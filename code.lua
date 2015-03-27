@@ -1,5 +1,5 @@
 if T==nil then
-  (Message or print)('\a\n >>> testC not active: skipping opcode tests <<<\n\a')
+  (Message or print)('\n >>> testC not active: skipping opcode tests <<<\n')
   return
 end
 print "testing code generation and optimizations"
@@ -12,6 +12,30 @@ do
   end
 end
 
+
+-- testing reuse in constant table
+local function checkKlist (func, list)
+  local k = T.listk(func)
+  assert(#k == #list)
+  for i = 1, #k do
+    assert(k[i] == list[i] and math.type(k[i]) == math.type(list[i]))
+  end
+end
+
+local function foo ()
+  local a
+  a = 3;
+  a = 0; a = 0.0; a = 3.0 - 3
+  a = 3.78/4; a = 3.78/4
+  a = -3.78/4; a = 3.78/4; a = -3.78/4
+  a = -3.79/4; a = 0.0; a = 0;
+  a = 3; a = 3.0; a = 3; a = 3.0
+end
+
+checkKlist(foo, {3, 0, 0.0, 3.78/4, -3.78/4, -3.79/4, 3.0})
+
+
+-- testing opcodes
 
 function check (f, ...)
   local arg = {...}
@@ -113,16 +137,29 @@ end,
   'SETTABLE', 'SETTABLE', 'SETTABLE', 'SUB', 'DIV', 'LOADK',
   'SETTABLE', 'RETURN')
 
+
 -- constant folding
-local function f () return -((2^8 + -(-1)) % 8)/2 * 4 - 3 end
-
-check(f, 'LOADK', 'RETURN')
-assert(f() == -5)
-
+local function checkK (func, val)
+  check(func, 'LOADK', 'RETURN')
+  local k = T.listk(func)
+  assert(#k == 1 and k[1] == val and math.type(k[1]) == math.type(val))
+  assert(func() == val)
+end
+checkK(function () return 3^-1 end, 1/3)
+checkK(function () return (1 + 1)^(50 + 50) end, 2^100)
+checkK(function () return (-2)^(31 - 2) end, -0x20000000 + 0.0)
+checkK(function () return (-3^0 + 5) // 3.2 end, 1)
+checkK(function () return -3 / 0 end, -1/0)
+checkK(function () return -3 % 5 end, 2)
+checkK(function () return -((2.0^8 + -(-1)) % 8)/2 * 4 - 3 end, -5.0)
+checkK(function () return -((2^8 + -(-1)) % 8)//2 * 4 - 3 end, -7)
+checkK(function () return 0xF0.0 | 0xCC.3 ~ 0xAA & 0xFD end, 0xF4)
+checkK(function () return ~(~0xFF0 | 0xFF0) end, 0)
+checkK(function () return ~~-100023.8 end, -100024)
+checkK(function () return ((100 << 6) << -4) >> 2 end, 100)
 
 -- bug in constant folding for 5.1
-check(function () return -nil end,
-  'LOADNIL', 'UNM', 'RETURN')
+check(function () return -nil end, 'LOADNIL', 'UNM', 'RETURN')
 
 
 check(function ()

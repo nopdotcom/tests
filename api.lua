@@ -1,6 +1,6 @@
 
 if T==nil then
-  (Message or print)('\a\n >>> testC not active: skipping API tests <<<\n\a')
+  (Message or print)('\n >>> testC not active: skipping API tests <<<\n')
   return
 end
 
@@ -80,7 +80,36 @@ tcheck(t, {n=4,2,3,3,5})
 t = pack(T.testC("copy -3 -1; gettop; return .", 2, 3, 4, 5))
 tcheck(t, {n=4,2,3,4,3})
 
+do   -- testing 'rotate'
+  local t = {10, 20, 30, 40, 50, 60}
+  for i = -6, 6 do
+    local s = string.format("rotate 2 %d; return 7", i)
+    local t1 = pack(T.testC(s, 10, 20, 30, 40, 50, 60))
+    tcheck(t1, t)
+    table.insert(t, 1, table.remove(t))
+  end
 
+  t = pack(T.testC("rotate -2 1; gettop; return .", 10, 20, 30, 40))
+  tcheck(t, {10, 20, 40, 30})
+  t = pack(T.testC("rotate -2 -1; gettop; return .", 10, 20, 30, 40))
+  tcheck(t, {10, 20, 40, 30})
+
+  -- some corner cases
+  t = pack(T.testC("rotate -1 0; gettop; return .", 10, 20, 30, 40))
+  tcheck(t, {10, 20, 30, 40})
+  t = pack(T.testC("rotate -1 1; gettop; return .", 10, 20, 30, 40))
+  tcheck(t, {10, 20, 30, 40})
+  t = pack(T.testC("rotate 5 -1; gettop; return .", 10, 20, 30, 40))
+  tcheck(t, {10, 20, 30, 40})
+end
+
+do   -- testing 'tounsigned'
+  local f = function (x) return T.testC("tounsigned 2; return 1", x) end
+  assert(f(-3) == -3)
+  assert(f(-3.0) == -3)
+  assert(f(2.0^100) == 0)
+  assert(f(2.0^20 + 1) == 2^20 + 1)
+end
 
 
 t = pack(T.testC("insert 3; pushvalue 3; remove 3; pushvalue 2; remove 2; \
@@ -128,6 +157,13 @@ assert(T.testC("pushnum 10; pushstring 20; arith /; return 1") == 0.5)
 assert(T.testC("pushstring 10; pushnum 20; arith -; return 1") == -10)
 assert(T.testC("pushstring 10; pushstring -20; arith *; return 1") == -200)
 assert(T.testC("pushstring 10; pushstring 3; arith ^; return 1") == 1000)
+assert(T.testC("arith /; return 1", 2, 0) == 10.0/0)
+a = T.testC("pushnum 10; pushnum 3; arith \\; return 1")
+assert(a == 3 and math.type(a) == "integer")
+a = assert(T.testC("pushint 10; pushint 3; arith +; return 1"))
+assert(a == 13 and math.type(a) == "integer")
+a = assert(T.testC("pushnum 10; pushint 3; arith +; return 1"))
+assert(a == 13 and math.type(a) == "float")
 a,b,c = T.testC([[pushnum 1;
                   pushstring 10; arith _;
                   pushstring 5; return 3]])
@@ -143,6 +179,11 @@ assert(x == 10 and y[1] == 12 and z == nil)
 assert(T.testC("arith %; return 1", a, c)[1] == 4%-3)
 assert(T.testC("arith _; arith +; arith %; return 1", b, a, c)[1] ==
                8 % (4 + (-3)*2))
+
+-- errors in arithmetic
+assert(not pcall(T.testC, "arith \\", 10, 0))
+assert(not pcall(T.testC, "arith \\", 10, 2.0^90))   -- integer overflow
+assert(not pcall(T.testC, "arith %", 10, 0))
 
 
 -- testing compare
@@ -293,7 +334,8 @@ assert(a(3) == math.deg(3) and a == math.deg)
 
 
 -- testing deep C stack
-do
+if not _soft then
+  print("testing stack overflow")
   collectgarbage("stop")
   local s, msg = pcall(T.testC, "checkstack 1000023 XXXX")   -- too deep
   assert(not s and string.find(msg, "XXXX"))
@@ -301,19 +343,21 @@ do
   s, msg = pcall(T.testC, s)
   assert(not s and string.find(msg, "XX"))
   collectgarbage("restart")
+  print'+'
 end
 
-local prog = {"checkstack 30000 msg", "newtable"}
-for i = 1,12000 do
+local lim = _soft and 500 or 12000
+local prog = {"checkstack " .. (lim * 2 + 100) .. "msg", "newtable"}
+for i = 1,lim do
   prog[#prog + 1] = "pushnum " .. i
   prog[#prog + 1] = "pushnum " .. i * 10
 end
 
 prog[#prog + 1] = "rawgeti R 2"   -- get global table in registry
-prog[#prog + 1] = "insert " .. -(2*12000 + 2)
+prog[#prog + 1] = "insert " .. -(2*lim + 2)
 
-for i = 1,12000 do
-  prog[#prog + 1] = "settable " .. -(2*(12000 - i + 1) + 1)
+for i = 1,lim do
+  prog[#prog + 1] = "settable " .. -(2*(lim - i + 1) + 1)
 end
 
 prog[#prog + 1] = "return 2"
@@ -321,7 +365,7 @@ prog[#prog + 1] = "return 2"
 prog = table.concat(prog, ";")
 local g, t = T.testC(prog)
 assert(g == _G)
-for i = 1,12000 do assert(t[i] == i*10); t[i] = nil end
+for i = 1,lim do assert(t[i] == i*10); t[i] = nil end
 assert(next(t) == nil)
 prog, g, t = nil
 
@@ -353,8 +397,10 @@ function checkerrnopro (code, msg)
 end
 
 checkerrnopro("pushnum 3; call 0 0", "attempt to call")
+print"stack overflow in unprotected thread"
 function f () f() end
 checkerrnopro("getglobal 'f'; call 0 0;", "stack overflow")
+print"+"
 
 
 -- testing table access
@@ -445,21 +491,48 @@ end
   
 
 
+-- testing get/setuservalue
 -- bug in 5.1.2
 assert(not pcall(debug.setuservalue, 3, {}))
 assert(not pcall(debug.setuservalue, nil, {}))
 assert(not pcall(debug.setuservalue, T.pushuserdata(1), {}))
 
 local b = T.newuserdata(0)
-local a = {}
 assert(debug.getuservalue(b) == nil)
-assert(debug.setuservalue(b, a))
-assert(debug.getuservalue(b) == a)
-assert(debug.setuservalue(b, nil))
-assert(debug.getuservalue(b) == nil)
+for _, v in pairs{true, false, 4.56, print, {}, b, "XYZ"} do
+  assert(debug.setuservalue(b, v) == b)
+  assert(debug.getuservalue(b) == v)
+end
 
 assert(debug.getuservalue(4) == nil)
 
+debug.setuservalue(b, function () return 10 end)
+collectgarbage()   -- function should not be collected
+assert(debug.getuservalue(b)() == 10)
+
+debug.setuservalue(b, 134)
+collectgarbage()   -- number should not be a problem for collector
+assert(debug.getuservalue(b) == 134)
+
+-- test barrier for uservalues
+T.gcstate("atomic")
+assert(T.gccolor(b) == "black")
+debug.setuservalue(b, {x = 100})
+T.gcstate("pause")  -- complete collection
+assert(debug.getuservalue(b).x == 100)  -- uvalue should be there
+
+-- long chain of userdata
+for i = 1, 1000 do
+  local bb = T.newuserdata(0)
+  debug.setuservalue(bb, b)
+  b = bb
+end
+collectgarbage()     -- nothing should not be collected
+for i = 1, 1000 do
+  b = debug.getuservalue(b)
+end
+assert(debug.getuservalue(b).x == 100)
+b = nil
 
 
 -- testing locks (refs)
@@ -558,8 +631,8 @@ do
   collectgarbage()
   assert(collectgarbage("count") <= x+1)
   -- udata with finalizer
-  x = collectgarbage("count")
   collectgarbage()
+  x = collectgarbage("count")
   collectgarbage("stop")
   a = {__gc = function () end}
   for i=1,1000 do debug.setmetatable(T.newuserdata(0), a) end
@@ -785,7 +858,7 @@ T.closestate(L1);
 L1 = T.newstate()
 T.loadlib(L1)
 T.doremote(L1, "a = {}")
-T.testC(L1, [[getglobal "a"; pushstring "x"; pushnum 1;
+T.testC(L1, [[getglobal "a"; pushstring "x"; pushint 1;
              settable -3]])
 assert(T.doremote(L1, "return a.x") == "1")
 
@@ -798,11 +871,11 @@ print('+')
 -------------------------------------------------------------------------
 -- testing memory limits
 -------------------------------------------------------------------------
-assert(not pcall(T.newuserdata, 2^32-4))
+assert(not pcall(T.newuserdata, math.maxinteger))   -- object too big
 collectgarbage()
 T.totalmem(T.totalmem()+5000)   -- set low memory limit (+5k)
 assert(not pcall(load"local a={}; for i=1,100000 do a[i]=i end"))
-T.totalmem(1000000000)          -- restore high limit
+T.totalmem(0)          -- restore high limit
 
 -- test memory errors; increase memory limit in small steps, so that
 -- we get memory errors in different parts of a given task, up to there
@@ -816,7 +889,7 @@ function testamem (s, f)
     M = M+7   -- increase memory limit in small steps
     T.totalmem(M)
     a, b = pcall(f)
-    T.totalmem(1000000000)  -- restore high limit
+    T.totalmem(0)  -- restore high limit
     if a and b then break end       -- stop when no more errors
     collectgarbage()
     if not a and not    -- `real' error?

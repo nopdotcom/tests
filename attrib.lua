@@ -1,8 +1,3 @@
--- The tests for 'require' assume some specific directories and libraries;
--- better to avoid them in generic machines
-
-if not _port then --[
-
 print "testing require"
 
 assert(require"string" == string)
@@ -23,7 +18,7 @@ print("package config: "..string.gsub(package.config, "\n", "|"))
 do
   -- create a path with 'max' templates,
   -- each with 1-10 repetitions of '?'
-  local max = 2000
+  local max = _soft and 100 or 2000
   local t = {}
   for i = 1,max do t[i] = string.rep("?", i%10 + 1) end
   t[#t + 1] = ";"    -- empty template
@@ -50,6 +45,12 @@ do
 end
 
 print('+')
+
+
+-- The next tests for 'require' assume some specific directories and
+-- libraries.
+
+if not _port then --[
 
 -- auxiliary directory with C modules and temporary files
 local DIR = "libs/"
@@ -219,7 +220,7 @@ local st, err, when = package.loadlib(D"lib1.so", "*")
 if not st then
   local f, err, when = package.loadlib("donotexist", p.."xuxu")
   assert(not f and type(err) == "string" and when == "absent")
-  ;(Message or print)('\a\n >>> cannot load dynamic library <<<\n\a')
+  ;(Message or print)('\n >>> cannot load dynamic library <<<\n')
   print(err, when)
 else
   -- tests for loadlib
@@ -228,7 +229,7 @@ else
   assert(a == 25 and b == 15)
 
   f = assert(package.loadlib(D"lib1.so", p.."anotherfunc"))
-  assert(f(10, 20) == "1020\n")
+  assert(f(10, 20) == "10%20\n")
 
   -- check error messages
   local f, err, when = package.loadlib(D"lib1.so", p.."xuxu")
@@ -348,7 +349,7 @@ assert(a[1<2] == 20 and a[1>2] == 10)
 function f(a) return a end
 
 local a = {}
-for i=3000,-3000,-1 do a[i] = i; end
+for i=3000,-3000,-1 do a[i + 0.0] = i; end
 a[10e30] = "alo"; a[true] = 10; a[false] = 20
 assert(a[10e30] == 'alo' and a[not 1] == 20 and a[10<20] == 10)
 for i=3000,-3000,-1 do assert(a[i] == i); end
@@ -368,12 +369,32 @@ assert(a[1]==10 and a[-3]==a.a and a[f]==print and a.x=='a' and not a.y)
 a[1], f(a)[2], b, c = {['alo']=assert}, 10, a[1], a[f], 6, 10, 23, f(a), 2
 a[1].alo(a[2]==10 and b==10 and c==print)
 
-a[2^31] = 10; a[2^31+1] = 11; a[-2^31] = 12;
-a[2^32] = 13; a[-2^32] = 14; a[2^32+1] = 15; a[10^33] = 16;
 
-assert(a[2^31] == 10 and a[2^31+1] == 11 and a[-2^31] == 12 and
-       a[2^32] == 13 and a[-2^32] == 14 and a[2^32+1] == 15 and
-       a[10^33] == 16)
+-- test of large float/integer indices 
+
+-- compute maximum integer where all bits fit in a float
+local maxint = math.maxinteger
+
+while maxint - 1.0 == maxint do   -- trim (if needed) to fit in a float
+  maxint = maxint // 2
+end
+
+maxintF = maxint + 0.0   -- float version
+
+assert(math.type(maxintF) == "float" and maxintF >= 2.0^14)
+
+-- floats and integers must index the same places
+a[maxintF] = 10; a[maxintF - 1.0] = 11;
+a[-maxintF] = 12; a[-maxintF + 1.0] = 13;
+
+assert(a[maxint] == 10 and a[maxint - 1] == 11 and
+       a[-maxint] == 12 and a[-maxint + 1] == 13)
+
+a[maxint] = 20
+a[-maxint] = 22
+
+assert(a[maxintF] == 20 and a[maxintF - 1.0] == 11 and
+       a[-maxintF] == 22 and a[-maxintF + 1.0] == 13)
 
 a = nil
 

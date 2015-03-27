@@ -28,6 +28,7 @@ int lib1_export (lua_State *L) {
 
 
 int onefunction (lua_State *L) {
+  luaL_checkversion(L);
   lua_settop(L, 2);
   lua_pushvalue(L, 1);
   return 2;
@@ -35,14 +36,16 @@ int onefunction (lua_State *L) {
 
 
 int anotherfunc (lua_State *L) {
-  lua_pushfstring(L, "%f%f\n", lua_tonumber(L, 1), lua_tonumber(L, 2));
+  luaL_checkversion(L);
+  lua_pushfstring(L, "%d%%%d\n", (int)lua_tointeger(L, 1),
+                                 (int)lua_tointeger(L, 2));
   return 1;
 } 
 
 
 int luaopen_lib1_sub (lua_State *L) {
-  lua_setglobal(L, "y");
-  lua_setglobal(L, "x");
+  lua_setglobal(L, "y");  /* 2nd arg: extra value (file name) */
+  lua_setglobal(L, "x");  /* 1st arg: module name */
   luaL_newlib(L, funcs);
   return 1;
 }

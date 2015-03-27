@@ -127,7 +127,7 @@ end
 a = {}
 for i=1,16 do a[i] = i end
 check(a, 16, 0)
-if not _port then
+do
   for i=1,11 do a[i] = nil end
   for i=30,50 do a[i] = nil end   -- force a rehash (?)
   check(a, 0, 8)   -- only 5 elements in the table
@@ -209,6 +209,9 @@ assert(nofind==find("return"))
 _G["xxx"] = 1
 assert(xxx==find("xxx"))
 
+-- invalid key to 'next'
+assert(string.find(select(2, pcall(next, {10,20}, 3)), "invalid key"))
+
 print('+')
 
 a = {}
@@ -282,7 +285,7 @@ table.maxn = nil
 
 -- int overflow
 a = {}
-for i=0,50 do a[math.pow(2,i)] = true end
+for i=0,50 do a[2^i] = true end
 assert(a[#a])
 
 print('+')
@@ -378,20 +381,82 @@ for i=0,1,-1 do error'not here' end
 a = nil; for i=1,1 do assert(not a); a=1 end; assert(a)
 a = nil; for i=1,1,-1 do assert(not a); a=1 end; assert(a)
 
-if not _port then
-  print("testing precision in numeric for")
-  local a = 0; for i=0, 1, 0.1 do a=a+1 end; assert(a==11)
-  a = 0; for i=0, 0.999999999, 0.1 do a=a+1 end; assert(a==10)
+do
+  print("testing floats in numeric for")
+  local a
+  -- integer count
   a = 0; for i=1, 1, 1 do a=a+1 end; assert(a==1)
-  a = 0; for i=1e10, 1e10, -1 do a=a+1 end; assert(a==1)
+  a = 0; for i=10000, 1e4, -1 do a=a+1 end; assert(a==1)
   a = 0; for i=1, 0.99999, 1 do a=a+1 end; assert(a==0)
-  a = 0; for i=99999, 1e5, -1 do a=a+1 end; assert(a==0)
+  a = 0; for i=9999, 1e4, -1 do a=a+1 end; assert(a==0)
   a = 0; for i=1, 0.99999, -1 do a=a+1 end; assert(a==1)
+
+  -- float count
+  a = 0; for i=0, 0.999999999, 0.1 do a=a+1 end; assert(a==10)
+  a = 0; for i=1.0, 1, 1 do a=a+1 end; assert(a==1)
+  a = 0; for i=-1.5, -1.5, 1 do a=a+1 end; assert(a==1)
+  a = 0; for i=1e6, 1e6, -1 do a=a+1 end; assert(a==1)
+  a = 0; for i=1.0, 0.99999, 1 do a=a+1 end; assert(a==0)
+  a = 0; for i=99999, 1e5, -1.0 do a=a+1 end; assert(a==0)
+  a = 0; for i=1.0, 0.99999, -1 do a=a+1 end; assert(a==1)
 end
 
 -- conversion
 a = 0; for i="10","1","-2" do a=a+1 end; assert(a==5)
 
+do  -- checking types
+  local c
+  local function checkfloat (i)
+    assert(math.type(i) == "float")
+    c = c + 1
+  end
+
+  c = 0; for i = 1.0, 10 do checkfloat(i) end
+  assert(c == 10)
+
+  c = 0; for i = -1, -10, -1.0 do checkfloat(i) end
+  assert(c == 10)
+
+  local function checkint (i)
+    assert(math.type(i) == "integer")
+    c = c + 1
+  end
+
+  local m = math.maxinteger
+  c = 0; for i = m, m - 10, -1 do checkint(i) end
+  assert(c == 11)
+
+  c = 0; for i = 1, 10.9 do checkint(i) end
+  assert(c == 10)
+
+  c = 0; for i = 10, 0.001, -1 do checkint(i) end
+  assert(c == 10)
+
+  c = 0; for i = 1, "10.8" do checkint(i) end
+  assert(c == 10)
+
+  c = 0; for i = 9, "3.4", -1 do checkint(i) end
+  assert(c == 6)
+
+  c = 0; for i = 0, " -3.4  ", -1 do checkint(i) end
+  assert(c == 4)
+
+  c = 0; for i = 100, "96.3", -2 do checkint(i) end
+  assert(c == 2)
+
+  c = 0; for i = 1, math.huge do if i > 10 then break end; checkint(i) end
+  assert(c == 10)
+
+  c = 0; for i = -1, -math.huge, -1 do
+           if i < -10 then break end; checkint(i)
+          end
+  assert(c == 10)
+
+
+  for i = math.mininteger, -10e100 do assert(false) end
+  for i = math.maxinteger, 10e100, -1 do assert(false) end
+
+end
 
 collectgarbage()
 

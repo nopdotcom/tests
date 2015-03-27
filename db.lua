@@ -203,7 +203,7 @@ foo()
 foo(print)
 foo(200, 3, 4)
 local a = {}
-for i = 1,1000 do a[i] = i end
+for i = 1, (_soft and 100 or 1000) do a[i] = i end
 foo(table.unpack(a))
 a = nil
 
@@ -382,7 +382,7 @@ assert(m == "" and c == 4)
 debug.sethook(function (e) a=a+1 end, "", 4000)
 a=0; for i=1,1000 do end; assert(a == 0)
 
-if not _no32 then
+do
   debug.sethook(print, "", 2^24 - 1)   -- count upperbound
   local f,m,c = debug.gethook()
   assert(({debug.gethook()})[3] == 2^24 - 1)
@@ -435,8 +435,7 @@ h(false)
 debug.sethook()
 assert(b == 2)   -- two tail calls
 
-lim = 30000
-if _soft then limit = 3000 end
+lim = _soft and 3000 or 30000
 local function foo (x)
   if x==0 then
     assert(debug.getinfo(2).what == "main")
@@ -626,6 +625,82 @@ assert (a==b and a.op == "__eq")
 assert (a>=b and a.op == "__le")
 assert (a>b and a.op == "__lt")
 
+
+print("testing debug functions on chunk without debug info")
+prog = [[-- program to be loaded without debug information
+local debug = require'debug'
+local a = 12  -- a local variable
+
+local n, v = debug.getlocal(1, 1)
+assert(n == "(*temporary)" and v == debug)   -- unkown name but known value
+n, v = debug.getlocal(1, 2)
+assert(n == "(*temporary)" and v == 12)   -- unkown name but known value
+
+-- a function with an upvalue
+local f = function () local x; return a end
+n, v = debug.getupvalue(f, 1)
+assert(n == "(*no name)" and v == 12)
+assert(debug.setupvalue(f, 1, 13) == "(*no name)")
+assert(a == 13)
+
+local t = debug.getinfo(f)
+assert(t.name == nil and t.linedefined > 0 and
+       t.lastlinedefined == t.linedefined and
+       t.short_src == "?")
+assert(debug.getinfo(1).currentline == -1)
+
+t = debug.getinfo(f, "L").activelines
+assert(next(t) == nil)    -- active lines are empty
+
+-- dump/load a function without debug info
+f = load(string.dump(f))
+
+t = debug.getinfo(f)
+assert(t.name == nil and t.linedefined > 0 and
+       t.lastlinedefined == t.linedefined and
+       t.short_src == "?")
+assert(debug.getinfo(1).currentline == -1)
+
+return a
+]]
+
+
+-- load 'prog' without debug info
+local f = assert(load(string.dump(load(prog), true)))
+
+assert(f() == 13)
+
+do   -- tests for 'source' in binary dumps
+  local prog = [[
+    return function (x)
+      return function (y) 
+        return x + y
+      end
+    end
+  ]]
+  local name = string.rep("x", 1000)
+  local p = assert(load(prog, name))
+  -- load 'p' as a binary chunk with debug information
+  local c = string.dump(p)
+  assert(#c > 1000 and #c < 2000)   -- no repetition of 'source' in dump
+  local f = assert(load(c))
+  local g = f()
+  local h = g(3)
+  assert(h(5) == 8)
+  assert(debug.getinfo(f).source == name and   -- all functions have 'source'
+         debug.getinfo(g).source == name and 
+         debug.getinfo(h).source == name)
+  -- again, without debug info
+  local c = string.dump(p, true)
+  assert(#c < 500)   -- no 'source' in dump
+  local f = assert(load(c))
+  local g = f()
+  local h = g(30)
+  assert(h(50) == 80)
+  assert(debug.getinfo(f).source == '=?' and   -- no function has 'source'
+         debug.getinfo(g).source == '=?' and 
+         debug.getinfo(h).source == '=?')
+end
 
 print"OK"
 

@@ -1,4 +1,4 @@
-debug = require "debug"
+local debug = require "debug"
 
 assert(type(os.getenv"PATH") == "string")
 
@@ -17,6 +17,8 @@ assert(type(io.stdin) == "userdata" and io.type(io.stderr) == "file")
 assert(io.type(8) == nil)
 local a = {}; setmetatable(a, {})
 assert(io.type(a) == nil)
+
+assert(getmetatable(io.input()).__name == "FILE*")
 
 local a,b,c = io.open('xuxu_nao_existe')
 assert(not a and type(b) == "string" and type(c) == "number")
@@ -89,8 +91,69 @@ assert(os.rename(file, otherfile))
 assert(os.rename(file, otherfile) == nil)
 
 io.output(io.open(otherfile, "ab"))
-assert(io.write("\n\n\t\t  3450\n"));
+assert(io.write("\n\n\t\t  ", 3450, "\n"));
 io.close()
+
+-- test writing/reading numbers
+local largeint = math.maxinteger
+f = assert(io.open(file, "w"))
+f:write(largeint, '\n')
+f:write(string.format("0X%x\n", largeint))
+f:write("0xABCp-3", '\n')
+f:write(0, '\n')
+f:write(-largeint, '\n')
+f:write(string.format("0x%X\n", -largeint))
+f:write("-0xABCp-3", '\n')
+assert(f:close())
+f = assert(io.open(file, "r"))
+assert(f:read("n") == largeint)
+assert(f:read("n") == largeint)
+assert(f:read("n") == 0xABCp-3)
+assert(f:read("n") == 0)
+assert(f:read("*n") == -largeint)            -- test old format (with '*')
+assert(f:read("n") == -largeint)
+assert(f:read("*n") == -0xABCp-3)            -- test old format (with '*')
+assert(f:close())
+assert(os.remove(file))
+
+
+f = assert(io.open(file, "w"))
+-- test number termination
+f:write[[
+-12.3-	-0xffff+  .3|5.E-3X  +234e+13E 0xDEADBEEFDEADBEEFx
+0x1.13Ap+3e
+]]
+-- very long number
+f:write("1234"); for i = 1, 1000 do f:write("0") end;  f:write("\n")
+-- invalid sequences (must read and discard valid prefixes)
+f:write[[
+.e+	0.e;	--;  0xX;
+]]
+assert(f:close())
+f = assert(io.open(file, "r"))
+assert(f:read("n") == -12.3); assert(f:read(1) == "-")
+assert(f:read("n") == -0xffff); assert(f:read(2) == "+ ")
+assert(f:read("n") == 0.3); assert(f:read(1) == "|")
+assert(f:read("n") == 5e-3); assert(f:read(1) == "X")
+assert(f:read("n") == 234e13); assert(f:read(1) == "E")
+assert(f:read("n") == 0Xdeadbeefdeadbeef); assert(f:read(2) == "x\n")
+assert(f:read("n") == 0x1.13aP3); assert(f:read(1) == "e")
+
+do   -- attempt to read too long number
+  assert(f:read("n") == nil)  -- fails
+  local s = f:read("L")   -- read rest of line
+  assert(string.find(s, "^00*\n$"))  -- lots of 0's left
+end
+
+assert(not f:read("n")); assert(f:read(2) == "e+")
+assert(not f:read("n")); assert(f:read(1) == ";")
+assert(not f:read("n")); assert(f:read(2) == "-;")
+assert(not f:read("n")); assert(f:read(1) == "X")
+assert(not f:read("n")); assert(f:read(1) == ";")
+assert(not f:read("n")); assert(not f:read(0))   -- end of file
+assert(f:close())
+assert(os.remove(file))
+
 
 -- test line generators
 assert(not pcall(io.lines, "non-existent-file"))
@@ -126,19 +189,19 @@ do  -- test error returns
   assert(not a and type(b) == "string" and type(c) == "number")
 end
 assert(io.read(0) == "")   -- not eof
-assert(io.read(5, '*l') == '"álo"')
+assert(io.read(5, 'l') == '"álo"')
 assert(io.read(0) == "")
 assert(io.read() == "second line")
 local x = io.input():seek()
 assert(io.read() == "third line ")
 assert(io.input():seek("set", x))
-assert(io.read('*L') == "third line \n")
+assert(io.read('L') == "third line \n")
 assert(io.read(1) == "ç")
 assert(io.read(string.len"fourth_line") == "fourth_line")
 assert(io.input():seek("cur", -string.len"fourth_line"))
 assert(io.read() == "fourth_line")
 assert(io.read() == "")  -- empty line
-assert(io.read('*n') == 3450)
+assert(io.read('n') == 3450)
 assert(io.read(1) == '\n')
 assert(io.read(0) == nil)  -- end of file
 assert(io.read(1) == nil)  -- end of file
@@ -146,10 +209,10 @@ assert(io.read(30000) == nil)  -- end of file
 assert(({io.read(1)})[2] == nil)
 assert(io.read() == nil)  -- end of file
 assert(({io.read()})[2] == nil)
-assert(io.read('*n') == nil)  -- end of file
-assert(({io.read('*n')})[2] == nil)
-assert(io.read('*a') == '')  -- end of file (OK for `*a')
-assert(io.read('*a') == '')  -- end of file (OK for `*a')
+assert(io.read('n') == nil)  -- end of file
+assert(({io.read('n')})[2] == nil)
+assert(io.read('a') == '')  -- end of file (OK for 'a')
+assert(io.read('a') == '')  -- end of file (OK for 'a')
 collectgarbage()
 print('+')
 io.close(io.input())
@@ -158,8 +221,8 @@ assert(not pcall(io.read))
 assert(os.remove(file))
 
 local t = '0123456789'
-for i=1,12 do t = t..t; end
-assert(string.len(t) == 10*2^12)
+for i=1,10 do t = t..t; end
+assert(string.len(t) == 10*2^10)
 
 io.output(file)
 io.write("alo"):write("\n")
@@ -181,7 +244,7 @@ assert(io.read(1) == ' ')
 assert(io.read(string.len(t)) == t)
 assert(io.read(1) == ' ')
 assert(io.read(0))
-assert(io.read('*a') == ';end of file\n')
+assert(io.read('a') == ';end of file\n')
 assert(io.read(0) == nil)
 assert(io.close(io.input()))
 
@@ -212,39 +275,39 @@ end
 
 assert(os.remove(file))
 
--- test for *L format
+-- test for L format
 io.output(file); io.write"\n\nline\nother":close()
 io.input(file)
-assert(io.read"*L" == "\n")
-assert(io.read"*L" == "\n")
-assert(io.read"*L" == "line\n")
-assert(io.read"*L" == "other")
-assert(io.read"*L" == nil)
+assert(io.read"L" == "\n")
+assert(io.read"L" == "\n")
+assert(io.read"L" == "line\n")
+assert(io.read"L" == "other")
+assert(io.read"L" == nil)
 io.input():close()
 
 local f = assert(io.open(file))
 local s = ""
-for l in f:lines("*L") do s = s .. l end
+for l in f:lines("L") do s = s .. l end
 assert(s == "\n\nline\nother")
 f:close()
 
 io.input(file)
 s = ""
-for l in io.lines(nil, "*L") do s = s .. l end
+for l in io.lines(nil, "L") do s = s .. l end
 assert(s == "\n\nline\nother")
 io.input():close()
 
 s = ""
-for l in io.lines(file, "*L") do s = s .. l end
+for l in io.lines(file, "L") do s = s .. l end
 assert(s == "\n\nline\nother")
 
 s = ""
-for l in io.lines(file, "*l") do s = s .. l end
+for l in io.lines(file, "l") do s = s .. l end
 assert(s == "lineother")
 
 io.output(file); io.write"a = 10 + 34\na = 2*a\na = -a\n":close()
 local t = {}
-load(io.lines(file, "*L"), nil, nil, t)()
+load(io.lines(file, "L"), nil, nil, t)()
 assert(t.a == -((10 + 34) * 2))
 
 
@@ -256,18 +319,18 @@ for a,b in io.lines(file, 1, 1) do
   end
 end
 
-for a,b,c in io.lines(file, 1, 2, "*a") do
+for a,b,c in io.lines(file, 1, 2, "a") do
   assert(a == "0" and b == "12" and c == "3456789\n")
 end
 
-for a,b,c in io.lines(file, "*a", 0, 1) do
+for a,b,c in io.lines(file, "a", 0, 1) do
   if a == "" then break end
   assert(a == "0123456789\n" and b == nil and c == nil)
 end
 collectgarbage()   -- to close file in previous iteration
 
 io.output(file); io.write"00\n10\n20\n30\n40\n":close()
-for a, b in io.lines(file, "*n", "*n") do
+for a, b in io.lines(file, "n", "n") do
   if a == 40 then assert(b == nil)
   else assert(a == b - 10)
   end
@@ -290,7 +353,7 @@ X
 _G.X = 1
 assert(not load(io.lines(file)))
 collectgarbage()   -- to close file in previous iteration
-load(io.lines(file, "*L"))()
+load(io.lines(file, "L"))()
 assert(_G.X == 2)
 load(io.lines(file, 1))()
 assert(_G.X == 4)
@@ -412,10 +475,10 @@ local filehandle = assert(io.open(file, 'r+'))
 local otherfilehandle = assert(io.open(otherfile, 'rb'))
 assert(filehandle ~= otherfilehandle)
 assert(type(filehandle) == "userdata")
-assert(filehandle:read('*l') == "qualquer coisa")
+assert(filehandle:read('l') == "qualquer coisa")
 io.input(otherfilehandle)
 assert(io.read(string.len"outra coisa") == "outra coisa")
-assert(filehandle:read('*l') == "mais qualquer coisa")
+assert(filehandle:read('l') == "mais qualquer coisa")
 filehandle:close();
 assert(type(filehandle) == "userdata")
 io.input(otherfilehandle)
@@ -423,7 +486,7 @@ assert(io.read(4) == "\0\1\3\0")
 assert(io.read(3) == "\0\0\0")
 assert(io.read(0) == "")        -- 255 is not eof
 assert(io.read(1) == "\255")
-assert(io.read('*a') == "\0")
+assert(io.read('a') == "\0")
 assert(not io.read(0))
 assert(otherfilehandle == io.input())
 otherfilehandle:close()
@@ -441,7 +504,7 @@ and the rest of the file
 ]]
   :close()
 io.input(file)
-local _,a,b,c,d,e,h,__ = io.read(1, '*n', '*n', '*l', '*l', '*l', '*a', 10)
+local _,a,b,c,d,e,h,__ = io.read(1, 'n', 'n', 'l', 'l', 'l', 'a', 10)
 assert(io.close(io.input()))
 assert(_ == ' ' and __ == nil)
 assert(type(a) == 'number' and a==123.4 and b==-56e-2)
@@ -459,23 +522,23 @@ do
   local fr = assert(io.open(file, "r"))
   assert(f:setvbuf("full", 2000))
   f:write("x")
-  assert(fr:read("*all") == "")  -- full buffer; output not written yet
+  assert(fr:read("all") == "")  -- full buffer; output not written yet
   f:close()
   fr:seek("set")
-  assert(fr:read("*all") == "x")   -- `close' flushes it
+  assert(fr:read("all") == "x")   -- `close' flushes it
   f = assert(io.open(file), "w")
   assert(f:setvbuf("no"))
   f:write("x")
   fr:seek("set")
-  assert(fr:read("*all") == "x")  -- no buffer; output is ready
+  assert(fr:read("all") == "x")  -- no buffer; output is ready
   f:close()
   f = assert(io.open(file, "a"))
   assert(f:setvbuf("line"))
   f:write("x")
   fr:seek("set", 1)
-  assert(fr:read("*all") == "")   -- line buffer; no output without `\n'
+  assert(fr:read("all") == "")   -- line buffer; no output without `\n'
   f:write("a\n"):seek("set", 1)
-  assert(fr:read("*all") == "xa\n")  -- now we have a whole line
+  assert(fr:read("all") == "xa\n")  -- now we have a whole line
   f:close(); fr:close()
   assert(os.remove(file))
 end
@@ -487,7 +550,7 @@ if not _soft then
   for i=1,5001 do io.write('0123456789123') end
   io.write('\n12346'):close()
   io.input(file)
-  local x = io.read('*a')
+  local x = io.read('a')
   io.input():seek('set', 0)
   local y = io.read(30001)..io.read(1005)..io.read(0)..
             io.read(1)..io.read(100003)
@@ -535,7 +598,7 @@ f = io.tmpfile()
 assert(io.type(f) == "file")
 f:write("alo")
 f:seek("set")
-assert(f:read"*a" == "alo")
+assert(f:read"a" == "alo")
 
 end --}
 

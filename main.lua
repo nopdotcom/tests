@@ -1,7 +1,7 @@
 # testing special comment on first line
 
 -- most (all?) tests here assume a reasonable "Unix-like" shell
-if _port then return end
+if _noposix then return end
 
 print ("testing lua.c options")
 
@@ -27,7 +27,7 @@ end
 
 function getoutput ()
   io.input(out)
-  local t = io.read("*a")
+  local t = io.read("a")
   io.input():close()
   assert(os.remove(out))
   return t
@@ -72,7 +72,7 @@ prepfile("print(package.path)")
 RUN("env LUA_INIT= LUA_PATH=x lua %s > %s", prog, out)
 checkout("x\n")
 
-RUN("env LUA_INIT= LUA_PATH_5_2=y LUA_PATH=x lua %s > %s", prog, out)
+RUN("env LUA_INIT= LUA_PATH_5_3=y LUA_PATH=x lua %s > %s", prog, out)
 checkout("y\n")
 
 prepfile("print(package.cpath)")
@@ -80,15 +80,15 @@ prepfile("print(package.cpath)")
 RUN("env LUA_INIT= LUA_CPATH=xuxu lua %s > %s", prog, out)
 checkout("xuxu\n")
 
-RUN("env LUA_INIT= LUA_CPATH_5_2=yacc LUA_CPATH=x lua %s > %s", prog, out)
+RUN("env LUA_INIT= LUA_CPATH_5_3=yacc LUA_CPATH=x lua %s > %s", prog, out)
 checkout("yacc\n")
 
 prepfile("print(X)")
-RUN('env LUA_INIT="X=3" lua %s > %s', prog, out)
-checkout("3\n")
+RUN('env LUA_INIT="X=tonumber(arg[1])" lua %s 3.2 > %s', prog, out)
+checkout("3.2\n")
 
 prepfile("print(X)")
-RUN('env LUA_INIT_5_2="X=10" LUA_INIT="X=3" lua %s > %s', prog, out)
+RUN('env LUA_INIT_5_3="X=10" LUA_INIT="X=3" lua %s > %s', prog, out)
 checkout("10\n")
 
 -- test option '-E'
@@ -135,7 +135,7 @@ a = string.format(a, progname)
 prepfile(a)
 RUN('lua "-e " -- %s a b c', prog)
 
-prepfile"assert(arg==nil)"
+prepfile"assert(arg)"
 prepfile("assert(arg)", otherprog)
 RUN('env LUA_PATH="?;;" lua -l%s - < %s', prog, otherprog)
 
@@ -160,11 +160,11 @@ RUN("lua - < %s > %s", prog, out)
 checkout("1\tnil\n")
 
 prepfile[[
-= (6*2-6) -- ===
-a 
-= 10
+(6*2-6) -- ===
+a =
+10
 print(a)
-= a]]
+a]]
 RUN([[lua -e"_PROMPT='' _PROMPT2=''" -i < %s > %s]], prog, out)
 checkprogout("6\n10\n10\n\n")
 
@@ -186,7 +186,7 @@ prepfile[[
 debug = require "debug"
 m = {x=0}
 setmetatable(m, {__tostring = function(x)
-  return debug.getinfo(4).currentline + x.x
+  return tostring(debug.getinfo(4).currentline + x.x)
 end})
 error(m)
 ]]
@@ -201,17 +201,17 @@ xuxu
 ]]
   local b = "\
 xuxu\n"
-  if x == 11 then return 1 , 2 end  --[[ test multiple returns ]]
+  if x == 11 then return 1 + 12 , 2 + 20 end  --[[ test multiple returns ]]
   return x + 1 
   --\\
 end
-=( f( 10 ) )
+return( f( 100 ) )
 assert( a == b )
-=f( 11 )  ]=]
+do return f( 11 ) end  ]=]
 s = string.gsub(s, ' ', '\n\n')
 prepfile(s)
 RUN([[lua -e"_PROMPT='' _PROMPT2=''" -i < %s > %s]], prog, out)
-checkprogout("11\n1\t2\n\n")
+checkprogout("101\n13\t22\n\n")
   
 prepfile[[#comment in 1st line without \n at the end]]
 RUN("lua %s", prog)

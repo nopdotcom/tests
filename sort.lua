@@ -5,7 +5,7 @@ print "testing unpack"
 local unpack = table.unpack
 
 local x,y,z,a,n
-a = {}; lim = 2000
+a = {}; lim = _soft and 200 or 2000
 for i=1, lim do a[i]=i end
 assert(select(lim, unpack(a)) == lim and select('#', unpack(a)) == lim)
 x = unpack(a)
@@ -27,18 +27,34 @@ assert(a==1 and x==nil)
 a,x = unpack({1,2}, 1, 1)
 assert(a==1 and x==nil)
 
-if not _no32 then
-  assert(not pcall(unpack, {}, 0, 2^31-1))
-  assert(not pcall(unpack, {}, 1, 2^31-1))
-  assert(not pcall(unpack, {}, -(2^31), 2^31-1))
-  assert(not pcall(unpack, {}, -(2^31 - 1), 2^31-1))
-  assert(pcall(unpack, {}, 2^31-1, 0))
-  assert(pcall(unpack, {}, 2^31-1, 1))
-  pcall(unpack, {}, 1, 2^31)
-  a, b = unpack({[2^31-1] = 20}, 2^31-1, 2^31-1)
+do
+  local maxI = math.maxinteger
+  local minI = math.mininteger
+  local maxi = (1 << 31) - 1          -- maximum value for an int (usually)
+  local mini = -(1 << 31)             -- minimum value for an int (usually)
+  assert(not pcall(unpack, {}, 0, maxi))
+  assert(not pcall(unpack, {}, 1, maxi))
+  assert(not pcall(unpack, {}, 0, maxI))
+  assert(not pcall(unpack, {}, 1, maxI))
+  assert(not pcall(unpack, {}, mini, maxi))
+  assert(not pcall(unpack, {}, -maxi, maxi))
+  assert(not pcall(unpack, {}, minI, maxI))
+  assert(pcall(unpack, {}, maxi, 0))
+  assert(pcall(unpack, {}, maxi, 1))
+  assert(pcall(unpack, {}, maxI, minI))
+  pcall(unpack, {}, 1, maxi + 1)
+  local a, b = unpack({[maxi] = 20}, maxi, maxi)
   assert(a == 20 and b == nil)
-  a, b = unpack({[2^31-1] = 20}, 2^31-2, 2^31-1)
+  a, b = unpack({[maxi] = 20}, maxi - 1, maxi)
   assert(a == nil and b == 20)
+  local t = {[maxI - 1] = 12, [maxI] = 23}
+  a, b = unpack(t, maxI - 1, maxI); assert(a == 12 and b == 23)
+  a, b = unpack(t, maxI, maxI); assert(a == 23 and b == nil)
+  a, b = unpack(t, maxI, maxI - 1); assert(a == nil and b == nil)
+  t = {[minI] = 12.3, [minI + 1] = 23.5}
+  a, b = unpack(t, minI, minI + 1); assert(a == 12.3 and b == 23.5)
+  a, b = unpack(t, minI, minI); assert(a == 12.3 and b == nil)
+  a, b = unpack(t, minI + 1, minI); assert(a == nil and b == nil)
 end
 
 print "testing pack"

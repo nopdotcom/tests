@@ -40,9 +40,7 @@ assert(doit("error()") == nil)
 
 
 -- test common errors/errors that crashed in the past
-if not _no32 then
-  assert(doit("table.unpack({}, 1, n=2^30)"))
-end
+assert(doit("table.unpack({}, 1, n=2^30)"))
 assert(doit("a=math.sin()"))
 assert(not doit("tostring(1)") and doit("tostring()"))
 assert(doit"tonumber()")
@@ -63,13 +61,13 @@ checksyntax([[
 -- tests for better error messages
 
 checkmessage("a=1; bbbb=2; a=math.sin(3)+bbbb(3)", "global 'bbbb'")
-checkmessage("a=1; local a,bbbb=2,3; a = math.sin(1) and bbbb(3)",
-       "local 'bbbb'")
 checkmessage("a={}; do local a=1 end a:bbbb(3)", "method 'bbbb'")
 checkmessage("local a={}; a.bbbb(3)", "field 'bbbb'")
 assert(not string.find(doit"a={13}; local bbbb=1; a[bbbb](3)", "'bbbb'"))
 checkmessage("a={13}; local bbbb=1; a[bbbb](3)", "number")
 checkmessage("a=(1)..{}", "a table value")
+
+checkmessage("a = #print", "length of a function value")
 
 aaa = nil
 checkmessage("aaa.bbb:ddd(9)", "global 'aaa'")
@@ -84,11 +82,36 @@ checkmessage("b=1; local aaa='a'; x=aaa+b", "local 'aaa'")
 checkmessage("aaa={}; x=3/aaa", "global 'aaa'")
 checkmessage("aaa='2'; b=nil;x=aaa*b", "global 'b'")
 checkmessage("aaa={}; x=-aaa", "global 'aaa'")
+
+-- short circuit
+checkmessage("a=1; local a,bbbb=2,3; a = math.sin(1) and bbbb(3)",
+       "local 'bbbb'")
+checkmessage("a=1; local a,bbbb=2,3; a = bbbb(1) or a(3)", "local 'bbbb'")
+checkmessage("local a,b,c,f = 1,1,1; f((a and b) or c)", "local 'f'")
+checkmessage("local a,b,c = 1,1,1; ((a and b) or c)()", "call a number value")
 assert(not string.find(doit"aaa={}; x=(aaa or aaa)+(aaa and aaa)", "'aaa'"))
 assert(not string.find(doit"aaa={}; (aaa or aaa)()", "'aaa'"))
 
-checkmessage("print(print < 10)", "function")
-checkmessage("print(print < print)", "two function")
+checkmessage("print(print < 10)", "function with number")
+checkmessage("print(print < print)", "two function values")
+checkmessage("print('10' < 10)", "string with number")
+checkmessage("print(10 < '23')", "number with string")
+
+-- integer division and conversion overflow
+checkmessage("local a = 2.0^100; x = a//2", "local a")
+checkmessage("local a = 1 // 2.0^100", "out of range")
+checkmessage("local a = '10' // 2.0^100", "out of range")
+checkmessage("local a = 2.0^100 & 1", "out of range")
+checkmessage("local a = 2.0^100 & '1'", "out of range")
+checkmessage("local a = 2.0 | 1e40", "out of range")
+checkmessage("local a = 2e100 ~ 1", "out of range")
+checkmessage("string.sub('a', 2.0^100)", "out of integer range")
+checkmessage("return 6e40 & 7", "out of range")
+checkmessage("return 34 << 7e30", "out of range")
+checkmessage("return ~-3e40", "out of range")
+checkmessage("return 34 >> {}", "table value")
+checkmessage("a = 24 // 0", "divide by zero")
+checkmessage("a = 1 % 0", "'n%0'")
 
 
 -- passing light userdata instead of full userdata
@@ -100,6 +123,12 @@ checkmessage([[
 ]], "light userdata")
 _G.D = nil
 
+do   -- named userdata
+  checkmessage("math.sin(io.input())", "(number expected, got FILE*)")
+  _ENV.XX = setmetatable({}, {__name = "My Type"})
+  checkmessage("io.input(XX)", "(FILE* expected, got My Type)")
+  _ENV.XX = nil
+end
 
 -- global functions
 checkmessage("(io.write or print){}", "io.write")
@@ -149,6 +178,8 @@ checkmessage([[  -- tail call
 checkmessage([[collectgarbage("nooption")]], "invalid option")
 
 checkmessage([[x = print .. "a"]], "concatenate")
+checkmessage([[x = "a" .. false]], "concatenate")
+checkmessage([[x = {} .. 2]], "concatenate")
 
 checkmessage("getmetatable(io.stdin).__gc()", "no value")
 
@@ -261,6 +292,8 @@ X=2;lineerror((p), 1)
 
 if not _soft then
   -- several tests that exaust the Lua stack
+  collectgarbage()
+  print"testing stack overflow"
   C = 0
   local l = debug.getinfo(1, "l").currentline; function y () C=C+1; y() end
 
@@ -331,10 +364,35 @@ if not _soft then
 end
 
 
--- non string messages
-function f() error{msg='x'} end
-res, msg = xpcall(f, function (r) return {msg=r.msg..'y'} end)
-assert(msg.msg == 'xy')
+do
+  -- non string messages
+  local t = {}
+  local res, msg = pcall(function () error(t) end)
+  assert(not res and msg == t)
+
+  res, msg = pcall(function () error(nil) end)
+  assert(not res and msg == nil)
+
+  local function f() error{msg='x'} end
+  res, msg = xpcall(f, function (r) return {msg=r.msg..'y'} end)
+  assert(msg.msg == 'xy')
+ 
+  -- 'assert' with no message
+  res, msg = pcall(function () assert(false) end)
+  local line = string.match(msg, "%w+%.lua:(%d+): assertion failed!$")
+  assert(tonumber(line) == debug.getinfo(1, "l").currentline - 2)
+
+  -- 'assert' with non-string messages
+  res, msg = pcall(function () assert(false, t) end)
+  assert(not res and msg == t)
+
+  res, msg = pcall(function () assert(nil, nil) end)
+  assert(not res and msg == nil)
+
+  -- 'assert' without arguments (behavior not specified, but must give
+  -- some kind of error)
+  assert(not pcall(assert))
+end
 
 -- xpcall with arguments
 a, b, c = xpcall(string.find, error, "alo", "al")
@@ -342,11 +400,14 @@ assert(a and b == 1 and c == 2)
 a, b, c = xpcall(string.find, function (x) return {} end, true, "al")
 assert(not a and type(b) == "table" and c == nil)
 
-print('+')
+
+print("testing tokens in error messages")
 checksyntax("syntax error", "", "error", 1)
 checksyntax("1.000", "", "1.000", 1)
 checksyntax("[[a]]", "", "[[a]]", 1)
 checksyntax("'aa'", "", "'aa'", 1)
+checksyntax("while << do end", "", "<<", 1)
+checksyntax("for >> do end", "", ">>", 1)
 
 -- test 255 as first char in a chunk
 checksyntax("\255a = 1", "", "char(255)", 1)
