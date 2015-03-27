@@ -1,4 +1,7 @@
-do --[
+-- The tests for 'require' assume some specific directories and libraries;
+-- better to avoid them in generic machines
+
+if not _port then --[
 
 print "testing require"
 
@@ -7,7 +10,6 @@ assert(require"math" == math)
 assert(require"table" == table)
 assert(require"io" == io)
 assert(require"os" == os)
-assert(require"debug" == debug)
 assert(require"coroutine" == coroutine)
 
 assert(type(package.path) == "string")
@@ -15,12 +17,50 @@ assert(type(package.cpath) == "string")
 assert(type(package.loaded) == "table")
 assert(type(package.preload) == "table")
 
+assert(type(package.config) == "string")
+print("package config: "..string.gsub(package.config, "\n", "|"))
 
+do
+  -- create a path with 'max' templates,
+  -- each with 1-10 repetitions of '?'
+  local max = 2000
+  local t = {}
+  for i = 1,max do t[i] = string.rep("?", i%10 + 1) end
+  t[#t + 1] = ";"    -- empty template
+  local path = table.concat(t, ";")
+  -- use that path in a search
+  local s, err = package.searchpath("xuxu", path)
+  -- search fails; check that message has an occurence of
+  -- '??????????' with ? replaced by xuxu and at least 'max' lines
+  assert(not s and
+         string.find(err, string.rep("xuxu", 10)) and
+         #string.gsub(err, "[^\n]", "") >= max)
+  -- path with one very long template
+  local path = string.rep("?", max)
+  local s, err = package.searchpath("xuxu", path)
+  assert(not s and string.find(err, string.rep('xuxu', max)))
+end
+
+do
+  local oldpath = package.path
+  package.path = {}
+  local s, err = pcall(require, "no-such-file")
+  assert(not s and string.find(err, "package.path"))
+  package.path = oldpath
+end
+
+print('+')
+
+-- auxiliary directory with C modules and temporary files
 local DIR = "libs/"
+
+-- prepend DIR to a name
+local function D (x) return DIR .. x end
+
 
 local function createfiles (files, preextras, posextras)
   for n,c in pairs(files) do
-    io.output(DIR..n)
+    io.output(D(n))
     io.write(string.format(preextras, n))
     io.write(c)
     io.write(string.format(posextras, n))
@@ -30,11 +70,13 @@ end
 
 function removefiles (files)
   for n in pairs(files) do
-    os.remove(DIR..n)
+    os.remove(D(n))
   end
 end
 
 local files = {
+  ["names.lua"] = "do return {...} end\n",
+  ["err.lua"] = "B = 15; a = a + 1;",
   ["A.lua"] = "",
   ["B.lua"] = "assert(...=='B');require 'A'",
   ["A.lc"] = "",
@@ -52,6 +94,13 @@ return AA]]
 
 createfiles(files, "", extras)
 
+-- testing explicit "dir" separator in 'searchpath'
+assert(package.searchpath("C.lua", D"?", "", "") == D"C.lua")
+assert(package.searchpath("C.lua", D"?", ".", ".") == D"C.lua")
+assert(package.searchpath("--x-", D"?", "-", "X") == D"XXxX")
+assert(package.searchpath("---xX", D"?", "---", "XX") == D"XXxX")
+assert(package.searchpath(D"C.lua", "?", "/") == D"C.lua")
+assert(package.searchpath(".\\C.lua", D"?", "\\") == D"./C.lua")
 
 local oldpath = package.path
 
@@ -65,6 +114,14 @@ local try = function (p, n, r)
   assert(rr == r)
 end
 
+a = require"names"
+assert(a[1] == "names" and a[2] == D"names.lua")
+
+_G.a = nil
+assert(not pcall(require, "err"))
+assert(B == 15)
+
+assert(package.searchpath("C", package.path) == D"C.lua")
 assert(require"C" == 25)
 assert(require"C" == 25)
 AA = nil
@@ -72,13 +129,15 @@ try('B', 'B.lua', true)
 assert(package.loaded.B)
 assert(require"B" == true)
 assert(package.loaded.A)
+assert(require"C" == 25)
 package.loaded.A = nil
 try('B', nil, true)   -- should not reload package
 try('A', 'A.lua', true)
 package.loaded.A = nil
-os.remove(DIR..'A.lua')
+os.remove(D'A.lua')
 AA = {}
 try('A', 'A.lc', AA)  -- now must find second option
+assert(package.searchpath("A", package.path) == D"A.lc")
 assert(require("A") == AA)
 AA = false
 try('K', 'L', false)     -- default option
@@ -94,6 +153,8 @@ removefiles(files)
 
 -- testing require of sub-packages
 
+local _G = _G
+
 package.path = string.gsub("D/?.lua;D/?/init.lua", "D/", DIR)
 
 files = {
@@ -101,24 +162,20 @@ files = {
   ["P1/xuxu.lua"] = "AA = 20",
 }
 
-createfiles(files, "module(..., package.seeall)\n", "")
+createfiles(files, "_ENV = {}\n", "\nreturn _ENV\n")
 AA = 0
 
 local m = assert(require"P1")
-assert(m == P1 and m._NAME == "P1" and AA == 0 and m.AA == 10)
-assert(require"P1" == P1 and P1 == m)
-assert(require"P1" == P1)
-assert(P1._PACKAGE == "")
+assert(AA == 0 and m.AA == 10)
+assert(require"P1" == m)
+assert(require"P1" == m)
 
-local m = assert(require"P1.xuxu")
-assert(m == P1.xuxu and m._NAME == "P1.xuxu" and AA == 0 and m.AA == 20)
-assert(require"P1.xuxu" == P1.xuxu and P1.xuxu == m)
-assert(require"P1.xuxu" == P1.xuxu)
-assert(require"P1" == P1)
-assert(P1.xuxu._PACKAGE == "P1.")
-assert(P1.AA == 10 and P1._PACKAGE == "")
-assert(P1._G == _G and P1.xuxu._G == _G)
-
+assert(package.searchpath("P1.xuxu", package.path) == D"P1/xuxu.lua")
+m.xuxu = assert(require"P1.xuxu")
+assert(AA == 0 and m.xuxu.AA == 20)
+assert(require"P1.xuxu" == m.xuxu)
+assert(require"P1.xuxu" == m.xuxu)
+assert(require"P1" == m and m.AA == 10)
 
 
 removefiles(files)
@@ -147,66 +204,57 @@ local function import(...)
   end
 end
 
-local assert, module, package = assert, module, package
-X = nil; x = 0; assert(_G.x == 0)   -- `x' must be a global variable
-module"X"; x = 1; assert(_M.x == 1)
-module"X.a.b.c"; x = 2; assert(_M.x == 2)
-module("X.a.b", package.seeall); x = 3
-assert(X._NAME == "X" and X.a.b.c._NAME == "X.a.b.c" and X.a.b._NAME == "X.a.b")
-assert(X._M == X and X.a.b.c._M == X.a.b.c and X.a.b._M == X.a.b)
-assert(X.x == 1 and X.a.b.c.x == 2 and X.a.b.x == 3)
-assert(X._PACKAGE == "" and X.a.b.c._PACKAGE == "X.a.b." and
-       X.a.b._PACKAGE == "X.a.")
-assert(_PACKAGE.."c" == "X.a.c")
-assert(X.a._NAME == nil and X.a._M == nil)
-module("X.a", import("X")) ; x = 4
-assert(X.a._NAME == "X.a" and X.a.x == 4 and X.a._M == X.a)
-module("X.a.b", package.seeall); assert(x == 3); x = 5
-assert(_NAME == "X.a.b" and X.a.b.x == 5)
-
-assert(X._G == nil and X.a._G == nil and X.a.b._G == _G and X.a.b.c._G == nil)
-
-setfenv(1, _G)
-assert(x == 0)
-
-assert(not pcall(module, "x"))
-assert(not pcall(module, "math.sin"))
+-- cannot change environment of a C function
+assert(not pcall(module, 'XUXU'))
 
 
--- testing C libraries
+
+-- testing require of C libraries
 
 
 local p = ""   -- On Mac OS X, redefine this to "_"
 
--- assert(loadlib == package.loadlib)   -- only for compatibility
-local f, err, when = package.loadlib("libs/lib1.so", p.."luaopen_lib1")
-if not f then
-  (Message or print)('\a\n >>> cannot load dynamic library <<<\n\a')
+-- check whether loadlib works in this system
+local st, err, when = package.loadlib(D"lib1.so", "*")
+if not st then
+  local f, err, when = package.loadlib("donotexist", p.."xuxu")
+  assert(not f and type(err) == "string" and when == "absent")
+  ;(Message or print)('\a\n >>> cannot load dynamic library <<<\n\a')
   print(err, when)
 else
-  f()   -- open library
-  assert(require("lib1") == lib1)
-  collectgarbage()
-  assert(lib1.id("x") == "x")
-  f = assert(package.loadlib("libs/lib1.so", p.."anotherfunc"))
+  -- tests for loadlib
+  local f = assert(package.loadlib(D"lib1.so", p.."onefunction"))
+  local a, b = f(15, 25)
+  assert(a == 25 and b == 15)
+
+  f = assert(package.loadlib(D"lib1.so", p.."anotherfunc"))
   assert(f(10, 20) == "1020\n")
-  f, err, when = package.loadlib("libs/lib1.so", p.."xuxu")
+
+  -- check error messages
+  local f, err, when = package.loadlib(D"lib1.so", p.."xuxu")
   assert(not f and type(err) == "string" and when == "init")
-  package.cpath = "libs/?.so"
-  require"lib2"
+  f, err, when = package.loadlib("donotexist", p.."xuxu")
+  assert(not f and type(err) == "string" and when == "open")
+
+  -- symbols from 'lib1' must be visible to other libraries
+  f = assert(package.loadlib(D"lib11.so", p.."luaopen_lib11"))
+  assert(f() == "exported")
+
+  -- test C modules with prefixes in names
+  package.cpath = D"?.so"
+  local lib2 = require"v-lib2"
+  -- check correct access to global environment and correct
+  -- parameters
+  assert(_ENV.x == "v-lib2" and _ENV.y == D"v-lib2.so")
   assert(lib2.id("x") == "x")
+
+  -- test C submodules
   local fs = require"lib1.sub"
-  assert(fs == lib1.sub and next(lib1.sub) == nil)
-  module("lib2", package.seeall)
-  f = require"-lib2"
-  assert(f.id("x") == "x" and _M == f and _NAME == "lib2")
-  module("lib1.sub", package.seeall)
-  assert(_M == fs)
-  setfenv(1, _G)
- 
+  assert(_ENV.x == "lib1.sub" and _ENV.y == D"lib1.so")
+  assert(fs.id(45) == 45)
 end
-f, err, when = package.loadlib("donotexist", p.."xuxu")
-assert(not f and type(err) == "string" and (when == "open" or when == "absent"))
+
+_ENV = _G
 
 
 -- testing preload
@@ -215,23 +263,23 @@ do
   local p = package
   package = {}
   p.preload.pl = function (...)
-    module(...)
+    local _ENV = {...}
     function xuxu (x) return x+20 end
+    return _ENV
   end
 
-  require"pl"
+  local pl = require"pl"
   assert(require"pl" == pl)
   assert(pl.xuxu(10) == 30)
+  assert(pl[1] == "pl" and pl[2] == nil)
 
   package = p
   assert(type(package.path) == "string")
 end
 
-
+print('+')
 
 end  --]
-
-print('+')
 
 print("testing assignments, logical operators, and constructors")
 
@@ -248,7 +296,7 @@ assert(a[10] == 10 and b == a and a[13] == 'x')
 
 do
   local f = function (n) local x = {}; for i=1,n do x[i]=i end;
-                         return unpack(x) end;
+                         return table.unpack(x) end;
   local a,b,c
   a,b = 0, f(1)
   assert(a == 0 and b == 1)
@@ -259,7 +307,6 @@ do
   a,b,c = 0,5,f(0)
   assert(a==0 and b==5 and c==nil)
 end
-
 
 a, b, c, d = 1 and nil, 1 or nil, (1 and (nil or 1)), 6
 assert(not a and b and c and d==6)
@@ -289,6 +336,8 @@ assert(not not a == true)
 assert(not not (6 or nil) == true)
 assert(not not (nil and 56) == false)
 assert(not not (nil and true) == false)
+
+assert({} ~= {})
 print('+')
 
 a = {}
@@ -308,6 +357,8 @@ a[f] = print
 a[a] = a
 assert(a[a][a][a][a][print] == assert)
 a[print](a[a[f]] == a[print])
+assert(not pcall(function () a[nil] = 10 end))
+assert(a[nil] == nil)
 a = nil
 
 a = {10,9,8,7,6,5,4,3,2; [-3]='a', [f]=print, a='a', b='ab'}
@@ -326,6 +377,7 @@ assert(a[2^31] == 10 and a[2^31+1] == 11 and a[-2^31] == 12 and
 a = nil
 
 
+-- test conflicts in multiple assignment
 do
   local a,i,j,b
   a = {'a', 'b'}; i=1; j=2; b=a
@@ -334,6 +386,35 @@ do
          b[3] == 1)
 end
 
+-- repeat test with upvalues
+do
+  local a,i,j,b
+  a = {'a', 'b'}; i=1; j=2; b=a
+  local function foo ()
+    i, a[i], a, j, a[j], a[i+j] = j, i, i, b, j, i
+  end
+  foo()
+  assert(i == 2 and b[1] == 1 and a == 1 and j == b and b[2] == 2 and
+         b[3] == 1)
+  local t = {}
+  (function (a) t[a], a = 10, 20  end)(1);
+  assert(t[1] == 10)
+end
+
+-- bug in 5.2 beta
+local function foo ()
+  local a
+  return function ()
+    local b
+    a, b = 3, 14    -- local and upvalue have same index
+    return a, b
+  end
+end
+
+local a, b = foo()()
+assert(a == 3 and b == 14)
+
 print('OK')
 
 return res
+

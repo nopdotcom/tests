@@ -1,5 +1,7 @@
 print("testing functions and calls")
 
+local debug = require "debug"
+
 -- get the opportunity to test 'type' too ;)
 
 assert(type(1<2) == 'boolean')
@@ -66,12 +68,12 @@ assert(t[1] == 1 and t[2] == 2 and t[3] == 3 and t[4] == 'a')
 
 function fat(x)
   if x <= 1 then return 1
-  else return x*loadstring("return fat(" .. x-1 .. ")")()
+  else return x*load("return fat(" .. x-1 .. ")")()
   end
 end
 
-assert(loadstring "loadstring 'assert(fat(6)==720)' () ")()
-a = loadstring('return fat(5), 3')
+assert(load "load 'assert(fat(6)==720)' () ")()
+a = load('return fat(5), 3')
 a,b = a()
 assert(a == 120 and b == 3)
 print('+')
@@ -114,34 +116,10 @@ a = nil
 assert(a == 23 and (function (x) return x*2 end)(20) == 40)
 
 
-local x,y,z,a
-a = {}; lim = 2000
-for i=1, lim do a[i]=i end
-assert(select(lim, unpack(a)) == lim and select('#', unpack(a)) == lim)
-x = unpack(a)
-assert(x == 1)
-x = {unpack(a)}
-assert(table.getn(x) == lim and x[1] == 1 and x[lim] == lim)
-x = {unpack(a, lim-2)}
-assert(table.getn(x) == 3 and x[1] == lim-2 and x[3] == lim)
-x = {unpack(a, 10, 6)}
-assert(next(x) == nil)   -- no elements
-x = {unpack(a, 11, 10)}
-assert(next(x) == nil)   -- no elements
-x,y = unpack(a, 10, 10)
-assert(x == 10 and y == nil)
-x,y,z = unpack(a, 10, 11)
-assert(x == 10 and y == 11 and z == nil)
-a,x = unpack{1}
-assert(a==1 and x==nil)
-a,x = unpack({1,2}, 1, 1)
-assert(a==1 and x==nil)
-
-
 -- testing closures
 
 -- fixed-point operator
-Y = function (le)
+Z = function (le)
       local function a (f)
         return le(function (x) return f(f)(x) end)
       end
@@ -158,9 +136,9 @@ F = function (f)
              end
     end
 
-fat = Y(F)
+fat = Z(F)
 
-assert(fat(0) == 1 and fat(4) == 24 and Y(F)(5)==5*Y(F)(4))
+assert(fat(0) == 1 and fat(4) == 24 and Z(F)(5)==5*Z(F)(4))
 
 local function g (z)
   local function f (a,b,c,d)
@@ -172,30 +150,26 @@ end
 f = g(10)
 assert(f(9, 16) == 10+11+12+13+10+9+16+10)
 
-Y, F, f = nil
+Z, F, f = nil
 print('+')
 
 -- testing multiple returns
 
 function unlpack (t, i)
   i = i or 1
-  if (i <= table.getn(t)) then
+  if (i <= #t) then
     return t[i], unlpack(t, i+1)
   end
 end
 
 function equaltab (t1, t2)
-  assert(table.getn(t1) == table.getn(t2))
-  for i,v1 in ipairs(t1) do
-    assert(v1 == t2[i])
+  assert(#t1 == #t2)
+  for i = 1, #t1 do
+    assert(t1[i] == t2[i])
   end
 end
 
-local function pack (...)
-  local x = {...}
-  x.n = select('#', ...)
-  return x
-end
+local pack = function (...) return (table.pack(...)) end
 
 function f() return 1,2,30,4 end
 function ret2 (a,b) return a,b end
@@ -224,11 +198,11 @@ table.sort({10,9,8,4,19,23,0,0}, function (a,b) return a<b end, "extra arg")
 
 
 -- test for generic load
-x = "-- a comment\0\0\0\n  x = 10 + \n23; \
+local x = "-- a comment\0\0\0\n  x = 10 + \n23; \
      local a = function () x = 'hi' end; \
      return '\0'"
-local i = 0
 function read1 (x)
+  local i = 0
   return function ()
     collectgarbage()
     i=i+1
@@ -236,21 +210,58 @@ function read1 (x)
   end
 end
 
-a = assert(load(read1(x), "modname"))
+function cannotload (msg, a,b)
+  assert(not a and string.find(b, msg))
+end
+
+a = assert(load(read1(x), "modname", "t", _G))
 assert(a() == "\0" and _G.x == 33)
 assert(debug.getinfo(a).source == "modname")
+-- cannot read text in binary mode
+cannotload("attempt to load a text chunk", load(read1(x), "modname", "b", {}))
+cannotload("attempt to load a text chunk", load(x, "modname", "b"))
 
-x = string.dump(loadstring("x = 1; return x"))
-i = 0
-a = assert(load(read1(x)))
+a = assert(load(function () return nil end))
+a()  -- empty chunk
+
+assert(not load(function () return true end))
+
+
+-- small bug
+local t = {nil, "return ", "3"}
+f, msg = load(function () return table.remove(t, 1) end)
+assert(f() == nil)   -- should read the empty chunk
+
+x = string.dump(load("x = 1; return x"))
+a = assert(load(read1(x), nil, "b"))
 assert(a() == 1 and _G.x == 1)
+cannotload("attempt to load a binary chunk", load(read1(x), nil, "t"))
+cannotload("attempt to load a binary chunk", load(x, nil, "t"))
 
-i = 0
-local a, b = load(read1("*a = 123"))
-assert(not a and type(b) == "string" and i == 2)
+assert(not pcall(string.dump, print))  -- no dump of C functions
 
-a, b = load(function () error("hhi") end)
-assert(not a and string.find(b, "hhi"))
+cannotload("unexpected symbol", load(read1("*a = 123")))
+cannotload("unexpected symbol", load("*a = 123"))
+cannotload("hhi", load(function () error("hhi") end))
+
+-- any value is valid for _ENV
+assert(load("return _ENV", nil, nil, 123)() == 123)
+
+
+-- load when _ENV is not first upvalue
+local x; XX = 123
+local function h ()
+  local y=x   -- use 'x', so that it becomes 1st upvalue
+  return XX   -- global name
+end
+local d = string.dump(h)
+x = load(d, "", "b")
+assert(debug.getupvalue(x, 2) == '_ENV')
+debug.setupvalue(x, 2, _G)
+assert(x() == 123)
+
+assert(assert(load("return XX + ...", nil, nil, {XX = 13}))(4) == 17)
+
 
 -- test generic load with nested functions
 x = [[
@@ -269,7 +280,7 @@ assert(a()(2)(3)(10) == 15)
 
 -- test for dump/undump with upvalues
 local a, b = 20, 30
-x = loadstring(string.dump(function (x)
+x = load(string.dump(function (x)
   if x == "set" then a = 10+b; b = b+1 else
   return a
   end

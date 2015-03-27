@@ -35,6 +35,8 @@ assert(string.find('alo123alo', '^12') == nil)
 assert(f('aloALO', '%l*') == 'alo')
 assert(f('aLo_ALO', '%a*') == 'aLo')
 
+assert(f("  \n\r*&\n\r   xuxu  \n\n", "%g%g%g+") == "xuxu")
+
 assert(f('aaab', 'a*') == 'aaa');
 assert(f('aaa', '^.*$') == 'aaa');
 assert(f('aaa', 'b*') == '');
@@ -149,7 +151,7 @@ function f(a,b) return string.gsub(a,'.',b) end
 assert(string.gsub("trocar tudo em |teste|b| é |beleza|al|", "|([^|]*)|([^|]*)|", f) ==
             "trocar tudo em bbbbb é alalalalalal")
 
-local function dostring (s) return loadstring(s)() or "" end
+local function dostring (s) return load(s)() or "" end
 assert(string.gsub("alo $a=1$ novamente $return a$", "$([^$]*)%$", dostring) ==
             "alo  novamente 1")
 
@@ -195,18 +197,24 @@ assert(not pcall(string.gsub, "alo", "(.)", "%2"))
 assert(not pcall(string.gsub, "alo", "(%1)", "a"))
 assert(not pcall(string.gsub, "alo", "(%0)", "a"))
 
--- big strings
-local a = string.rep('a', 300000)
-assert(string.find(a, '^a*.?$'))
-assert(not string.find(a, '^a*.?b$'))
-assert(string.find(a, '^a-.?$'))
+if not _soft then
+  -- big strings
+  local a = string.rep('a', 300000)
+  assert(string.find(a, '^a*.?$'))
+  assert(not string.find(a, '^a*.?b$'))
+  assert(string.find(a, '^a-.?$'))
 
--- deep nest of gsubs
+  -- bug in 5.1.2
+  a = string.rep('a', 10000) .. string.rep('b', 10000)
+  assert(not pcall(string.gsub, a, 'b'))
+end
+
+-- recursive nest of gsubs
 function rev (s)
   return string.gsub(s, "(.)(.+)", function (c,s1) return rev(s1)..c end)
 end
 
-local x = string.rep('012345', 10)
+local x = "abcdef"
 assert(rev(rev(x)) == x)
 
 
@@ -223,7 +231,6 @@ assert(string.gsub("a alo b hi", "%w%w+", t) == "a ALO b HI")
 
 
 -- tests for gmatch
-assert(string.gfind == string.gmatch)
 local a = 0
 for i in string.gmatch('abcde', '()') do assert(i == a+1); a=i end
 assert(a==6)
@@ -238,7 +245,7 @@ t = {3, 6, 9}
 for i in string.gmatch ("xuxx uu ppar r", "()(.)%2") do
   assert(i == table.remove(t, 1))
 end
-assert(table.getn(t) == 0)
+assert(#t == 0)
 
 t = {}
 for i,j in string.gmatch("13 14 10 = 11, 15= 16, 22=23", "(%d+)%s*=%s*(%d+)") do
@@ -258,6 +265,14 @@ assert(string.gsub("01abc45 de3x", "%f[%D]%w", ".") == "01.bc45 de3.")
 assert(string.gsub("function", "%f[\1-\255]%w", ".") == ".unction")
 assert(string.gsub("function", "%f[^\1-\255]", ".") == "function.")
 
+assert(string.find("a", "%f[a]") == 1)
+assert(string.find("a", "%f[^%z]") == 1)
+assert(string.find("a", "%f[^%l]") == 2)
+assert(string.find("aba", "%f[a%z]") == 3)
+assert(string.find("aba", "%f[%z]") == 4)
+assert(not string.find("aba", "%f[%l%z]"))
+assert(not string.find("aba", "%f[^%l%z]"))
+
 local i, e = string.find(" alo aalo allo", "%f[%S].-%f[%s].-%f[%S]")
 assert(i == 2 and e == 5)
 local k = string.match(" alo aalo allo", "%f[%S](.-%f[%s].-%f[%S])")
@@ -267,7 +282,38 @@ local a = {1, 5, 9, 14, 17,}
 for k in string.gmatch("alo alo th02 is 1hat", "()%f[%w%d]") do
   assert(table.remove(a, 1) == k)
 end
-assert(table.getn(a) == 0)
+assert(#a == 0)
 
+
+-- malformed patterns
+local function malform (p, m)
+  m = m or "malformed"
+  local r, msg = pcall(string.find, "a", p)
+  assert(not r and string.find(msg, m))
+end
+
+malform("[a")
+malform("[]")
+malform("[^]")
+malform("[a%]")
+malform("[a%")
+malform("%b")
+malform("%ba")
+malform("%")
+malform("%f", "missing")
+
+-- \0 in patterns
+assert(string.match("ab\0\1\2c", "[\0-\2]+") == "\0\1\2")
+assert(string.match("ab\0\1\2c", "[\0-\0]+") == "\0")
+assert(string.find("b$a", "$\0?") == 2)
+assert(string.find("abc\0efg", "%\0") == 4)
+assert(string.match("abc\0efg\0\1e\1g", "%b\0\1") == "\0efg\0\1e\1")
+assert(string.match("abc\0\0\0", "%\0+") == "\0\0\0")
+assert(string.match("abc\0\0\0", "%\0%\0?") == "\0\0")
+
+-- magic char after \0
+assert(string.find("abc\0\0","\0.") == 4)
+assert(string.find("abcx\0\0abc\0abc","x\0\0abc\0a.") == 4)
 
 print('OK')
+

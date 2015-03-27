@@ -2,7 +2,7 @@ print('testing metatables')
 
 X = 20; B = 30
 
-setfenv(1, setmetatable({}, {__index=_G}))
+_ENV = setmetatable({}, {__index=_G})
 
 collectgarbage()
 
@@ -48,6 +48,7 @@ collectgarbage()
 
 a = setmetatable({}, t)
 function f(t, i, v) rawset(t, i, v-3) end
+setmetatable(t, t)   -- causes a bug in 5.1 !
 t.__newindex = f
 a[1] = 30; a.x = "101"; a[5] = 200
 assert(a[1] == 27 and a.x == 98 and a[5] == 197)
@@ -86,11 +87,12 @@ do  -- newindex
 end
 
 
+setmetatable(t, nil)
 function f (t, ...) return t, {...} end
 t.__call = f
 
 do
-  local x,y = a(unpack{'a', 1})
+  local x,y = a(table.unpack{'a', 1})
   assert(x==a and y[1]=='a' and y[2]==1 and y[3]==nil)
   x,y = a()
   assert(x==a and y[1]==nil)
@@ -110,6 +112,7 @@ t.__div = f("div")
 t.__mod = f("mod")
 t.__unm = f("unm")
 t.__pow = f("pow")
+t.__len = f("len")
 
 assert(b+5 == b)
 assert(cap[0] == "add" and cap[1] == b and cap[2] == 5 and cap[3]==nil)
@@ -140,7 +143,17 @@ assert(4^a == 4)
 assert(cap[0] == "pow" and cap[1] == 4 and cap[2] == a and cap[3]==nil)
 assert('4'^a == '4')
 assert(cap[0] == "pow" and cap[1] == '4' and cap[2] == a and cap[3]==nil)
+assert(#a == a)
+assert(cap[0] == "len" and cap[1] == a)
 
+
+-- test for rawlen
+t = setmetatable({1,2,3}, {__len = function () return 10 end})
+assert(#t == 10 and rawlen(t) == 3)
+assert(rawlen"abc" == 3)
+assert(not pcall(rawlen, io.stdin))
+assert(not pcall(rawlen, 34))
+assert(not pcall(rawlen))
 
 t = {}
 t.__lt = function (a,b,c)
@@ -155,13 +168,17 @@ function Op(x) return setmetatable({x=x}, t) end
 
 local function test ()
   assert(not(Op(1)<Op(1)) and (Op(1)<Op(2)) and not(Op(2)<Op(1)))
+  assert(not(1 < Op(1)) and (Op(1) < 2) and not(2 < Op(1)))
   assert(not(Op('a')<Op('a')) and (Op('a')<Op('b')) and not(Op('b')<Op('a')))
+  assert(not('a' < Op('a')) and (Op('a') < 'b') and not(Op('b') < Op('a')))
   assert((Op(1)<=Op(1)) and (Op(1)<=Op(2)) and not(Op(2)<=Op(1)))
   assert((Op('a')<=Op('a')) and (Op('a')<=Op('b')) and not(Op('b')<=Op('a')))
   assert(not(Op(1)>Op(1)) and not(Op(1)>Op(2)) and (Op(2)>Op(1)))
   assert(not(Op('a')>Op('a')) and not(Op('a')>Op('b')) and (Op('b')>Op('a')))
   assert((Op(1)>=Op(1)) and not(Op(1)>=Op(2)) and (Op(2)>=Op(1)))
+  assert((1 >= Op(1)) and not(1 >= Op(2)) and (Op(2) >= 1))
   assert((Op('a')>=Op('a')) and not(Op('a')>=Op('b')) and (Op('b')>=Op('a')))
+  assert(('a' >= Op('a')) and not(Op('a') >= 'b') and (Op('b') >= Op('a')))
 end
 
 test()
@@ -247,10 +264,22 @@ assert(c..d == 'cd')
 assert(0 .."a".."b"..c..d.."e".."f"..(5+3).."g" == "0abcdef8g")
 
 A = false
+assert((c..d..c..d).val == 'cdcd')
 x = c..d
 assert(getmetatable(x) == t and x.val == 'cd')
 x = 0 .."a".."b"..c..d.."e".."f".."g"
 assert(x.val == "0abcdefg")
+
+
+-- concat metamethod x numbers (bug in 5.1.1)
+c = {}
+local x
+setmetatable(c, {__concat = function (a,b)
+  assert(type(a) == "number" and b == c or type(b) == "number" and a == c)
+  return c
+end})
+assert(c..5 == c and 5 .. c == c)
+assert(4 .. c .. 5 == c and 4 .. 5 .. 6 .. 7 .. c == c)
 
 
 -- test comparison compatibilities
@@ -259,7 +288,6 @@ t1 = {};  c = {}; setmetatable(c, t1)
 d = {}
 t1.__eq = function () return true end
 t1.__lt = function () return true end
-assert(c ~= d and not pcall(function () return c < d end))
 setmetatable(d, t1)
 assert(c == d and c < d and not(d <= c))
 t2 = {}
@@ -291,32 +319,11 @@ assert(i == 3 and x[1] == 3 and x[3] == 5)
 
 
 assert(_G.X == 20)
-assert(_G == getfenv(0))
 
 print'+'
 
 local _g = _G
-setfenv(1, setmetatable({}, {__index=function (_,k) return _g[k] end}))
-
--- testing proxies
-assert(getmetatable(newproxy()) == nil)
-assert(getmetatable(newproxy(false)) == nil)
-
-local u = newproxy(true)
-
-getmetatable(u).__newindex = function (u,k,v)
-  getmetatable(u)[k] = v
-end
-
-getmetatable(u).__index = function (u,k)
-  return getmetatable(u)[k]
-end
-
-for i=1,10 do u[i] = i end
-for i=1,10 do assert(u[i] == i) end
-
-local k = newproxy(u)
-assert(getmetatable(k) == getmetatable(u))
+_ENV = setmetatable({}, {__index=function (_,k) return _g[k] end})
 
 
 a = {}
@@ -326,6 +333,7 @@ assert(a.x == 1 and rawget(a, "x", 3) == 1)
 print '+'
 
 -- testing metatables for basic types
+local debug = require'debug'
 mt = {}
 debug.setmetatable(10, mt)
 assert(getmetatable(-2) == mt)
@@ -355,6 +363,26 @@ assert(getmetatable(nil) == nil)
 debug.setmetatable(nil, {})
 
 
+-- loops in delegation
+a = {}; setmetatable(a, a); a.__index = a; a.__newindex = a
+assert(not pcall(function (a,b) return a[b] end, a, 10))
+assert(not pcall(function (a,b,c) a[b] = c end, a, 10, true))
+
+-- bug in 5.1
+T, K, V = nil
+grandparent = {}
+grandparent.__newindex = function(t,k,v) T=t; K=k; V=v end
+
+parent = {}
+parent.__newindex = parent
+setmetatable(parent, grandparent)
+
+child = setmetatable({}, parent)
+child.foo = 10      --> CRASH (on some machines)
+assert(T == parent and K == "foo" and V == 10)
+
 print 'OK'
 
 return 12
+
+

@@ -1,6 +1,8 @@
 -- testing debug library
 
-local function dostring(s) return assert(loadstring(s))() end
+debug = require "debug"
+
+local function dostring(s) return assert(load(s))() end
 
 print"testing debug library and debug information"
 
@@ -16,16 +18,21 @@ function test (s, l, p)
     if p then print(l, line) end
     assert(l == line, "wrong trace!!")
   end
-  debug.sethook(f,"l"); loadstring(s)(); debug.sethook()
-  assert(table.getn(l) == 0)
+  debug.sethook(f,"l"); load(s)(); debug.sethook()
+  assert(#l == 0)
 end
 
 
 do
+  assert(not pcall(debug.getinfo, print, "X"))   -- invalid option
+  assert(debug.getinfo(1000) == nil)   -- out of range level
+  assert(debug.getinfo(-1) == nil)     -- out of range level
   local a = debug.getinfo(print)
   assert(a.what == "C" and a.short_src == "[C]")
+  a = debug.getinfo(print, "L")
+  assert(a.activelines == nil)
   local b = debug.getinfo(test, "SfL")
-  assert(b.name == nil and b.what == "Lua" and b.linedefined == 11 and
+  assert(b.name == nil and b.what == "Lua" and b.linedefined == 13 and
          b.lastlinedefined == b.linedefined + 10 and
          b.func == test and not string.find(b.short_src, "%["))
   assert(b.activelines[b.linedefined + 1] and
@@ -37,10 +44,12 @@ end
 
 -- test file and string names truncation
 a = "function f () end"
-local function dostring (s, x) return loadstring(s, x)() end
+local function dostring (s, x) return load(s, x)() end
 dostring(a)
 assert(debug.getinfo(f).short_src == string.format('[string "%s"]', a))
 dostring(a..string.format("; %s\n=1", string.rep('p', 400)))
+assert(string.find(debug.getinfo(f).short_src, '^%[string [^\n]*%.%.%."%]$'))
+dostring(a..string.format("; %s=1", string.rep('p', 400)))
 assert(string.find(debug.getinfo(f).short_src, '^%[string [^\n]*%.%.%."%]$'))
 dostring("\n"..a)
 assert(debug.getinfo(f).short_src == '[string "..."]')
@@ -53,7 +62,7 @@ assert(string.find(debug.getinfo(f).short_src, "^%.%.%.p*t$"))
 dostring(a, "=xuxu")
 assert(debug.getinfo(f).short_src == "xuxu")
 dostring(a, string.format("=%s", string.rep('x', 500)))
-assert(string.find(debug.getinfo(f).short_src, "^x*"))
+assert(string.find(debug.getinfo(f).short_src, "^x*$"))
 dostring(a, "=")
 assert(debug.getinfo(f).short_src == "")
 a = nil; f = nil;
@@ -102,7 +111,7 @@ then
 else
   a=2
 end
-]], {2,4,7})
+]], {2,3,4,7})
 
 test([[--
 if nil then
@@ -128,15 +137,14 @@ a=1
 while a<=3 do
   a=a+1
 end
-]], {2,3,4,3,4,3,4,3,5})
+]], {1,2,3,4,3,4,3,4,3,5})
 
 test([[while math.sin(1) do
   if math.sin(1)
-  then
-    break
+  then break
   end
 end
-a=1]], {1,2,4,7})
+a=1]], {1,2,3,6})
 
 test([[for i=1,3 do
   a=i
@@ -153,6 +161,56 @@ test([[for i=1,4 do a=1 end]], {1,1,1,1,1})
 
 
 print'+'
+
+-- invalid levels in [gs]etlocal
+assert(not pcall(debug.getlocal, 20, 1))
+assert(not pcall(debug.setlocal, -1, 1, 10))
+
+
+-- parameter names
+local function foo (a,b,...) local d, e end
+local co = coroutine.create(foo)
+
+assert(debug.getlocal(foo, 1) == 'a')
+assert(debug.getlocal(foo, 2) == 'b')
+assert(debug.getlocal(foo, 3) == nil)
+assert(debug.getlocal(co, foo, 1) == 'a')
+assert(debug.getlocal(co, foo, 2) == 'b')
+assert(debug.getlocal(co, foo, 3) == nil)
+
+assert(debug.getlocal(print, 1) == nil)
+
+
+-- varargs
+local function foo (a, ...)
+  local t = table.pack(...)
+  for i = 1, t.n do
+    local n, v = debug.getlocal(1, -i)
+    assert(n == "(*vararg)" and v == t[i])
+  end
+  assert(not debug.getlocal(1, -(t.n + 1)))
+  assert(not debug.setlocal(1, -(t.n + 1), 30))
+  if t.n > 0 then
+    (function (x)
+      assert(debug.setlocal(2, -1, x) == "(*vararg)")
+      assert(debug.setlocal(2, -t.n, x) == "(*vararg)")
+     end)(430)
+     assert(... == 430)
+  end
+end
+
+foo()
+foo(print)
+foo(200, 3, 4)
+local a = {}
+for i = 1,1000 do a[i] = i end
+foo(table.unpack(a))
+a = nil
+
+-- access to vararg in non-vararg function
+local function foo () return debug.getlocal(1, -1) end
+assert(foo(10) == nil)
+
 
 a = {}; L = nil
 local glob = 1
@@ -173,6 +231,7 @@ debug.sethook(function (e,l)
   end
 end, "crl")
 
+
 function f(a,b)
   collectgarbage()
   local _, x = debug.getlocal(1, 1)
@@ -182,7 +241,7 @@ function f(a,b)
   assert(debug.setlocal(2, 4, "maçã") == "B")
   x = debug.getinfo(2)
   assert(x.func == g and x.what == "Lua" and x.name == 'g' and
-         x.nups == 0 and string.find(x.source, "^@.*db%.lua"))
+         x.nups == 1 and string.find(x.source, "^@.*db%.lua$"))
   glob = glob+1
   assert(debug.getinfo(1, "l").currentline == L+1)
   assert(debug.getinfo(1, "l").currentline == L+2)
@@ -204,6 +263,7 @@ assert(debug.getinfo(1, "l").currentline == L+11)  -- check count of lines
 
 
 function g(...)
+  local arg = {...}
   do local a,b,c; a=math.sin(40); end
   local feijao
   local AAAA,B = "xuxu", "mamão"
@@ -251,12 +311,12 @@ assert(debug.gethook() == nil)
 
 X = nil
 a = {}
-function a:f (a, b, ...) local c = 13 end
+function a:f (a, b, ...) local arg = {...}; local c = 13 end
 debug.sethook(function (e)
   assert(e == "call")
   dostring("XX = 12")  -- test dostring inside hooks
   -- testing errors inside hooks
-  assert(not pcall(loadstring("a='joao'+1")))
+  assert(not pcall(load("a='joao'+1")))
   debug.sethook(function (e, l) 
     assert(debug.getinfo(2, "l").currentline == l)
     local f,m,c = debug.gethook()
@@ -276,7 +336,7 @@ debug.sethook(function (e)
 end, "c")
 
 a:f(1,2,3,4,5)
-assert(X.self == a and X.a == 1   and X.b == 2 and X.arg.n == 3 and X.c == nil)
+assert(X.self == a and X.a == 1   and X.b == 2 and X.c == nil)
 assert(XX == 12)
 assert(debug.gethook() == nil)
 
@@ -307,9 +367,8 @@ t = getupvalues(foo2)
 assert(t.a == 1 and t.b == 2 and t.c == 3)
 assert(debug.setupvalue(foo1, 1, "xuxu") == "b")
 assert(({debug.getupvalue(foo2, 3)})[2] == "xuxu")
--- cannot manipulate C upvalues from Lua
-assert(debug.getupvalue(io.read, 1) == nil)  
-assert(debug.setupvalue(io.read, 1, 10) == nil)  
+-- upvalues of C functions are allways "called" "" (the empty string)
+assert(debug.getupvalue(string.gmatch("x", "x"), 1) == "")  
 
 
 -- testing count hooks
@@ -322,9 +381,13 @@ local f,m,c = debug.gethook()
 assert(m == "" and c == 4)
 debug.sethook(function (e) a=a+1 end, "", 4000)
 a=0; for i=1,1000 do end; assert(a == 0)
-debug.sethook(print, "", 2^24 - 1)   -- count upperbound
-local f,m,c = debug.gethook()
-assert(({debug.gethook()})[3] == 2^24 - 1)
+
+if not _no32 then
+  debug.sethook(print, "", 2^24 - 1)   -- count upperbound
+  local f,m,c = debug.gethook()
+  assert(({debug.gethook()})[3] == 2^24 - 1)
+end
+
 debug.sethook()
 
 
@@ -332,16 +395,10 @@ debug.sethook()
 local function f (x)
   if x then
     assert(debug.getinfo(1, "S").what == "Lua")
+    assert(debug.getinfo(1, "t").istailcall == true)
     local tail = debug.getinfo(2)
-    assert(not pcall(getfenv, 3))
-    assert(tail.what == "tail" and tail.short_src == "(tail call)" and
-           tail.linedefined == -1 and tail.func == nil)
-    assert(debug.getinfo(3, "f").func == g1)
-    assert(getfenv(3))
-    assert(debug.getinfo(4, "S").what == "tail")
-    assert(not pcall(getfenv, 5))
-    assert(debug.getinfo(5, "S").what == "main")
-    assert(getfenv(5))
+    assert(tail.func == g1 and tail.istailcall == true)
+    assert(debug.getinfo(3, "S").what == "main")
     print"+"
     end
 end
@@ -359,18 +416,32 @@ debug.sethook(function (e) table.insert(b, e) end, "cr")
 h(false)
 debug.sethook()
 local res = {"return",   -- first return (from sethook)
-  "call", "call", "call", "call",
-  "return", "tail return", "return", "tail return",
+  "call", "tail call", "call", "tail call",
+  "return", "return",
   "call",    -- last call (to sethook)
 }
-for _, k in ipairs(res) do assert(k == table.remove(b, 1)) end
+for i = 1, #res do assert(res[i] == table.remove(b, 1)) end
 
+b = 0
+debug.sethook(function (e)
+                if e == "tail call" then
+                  b = b + 1
+                  assert(debug.getinfo(2, "t").istailcall == true)
+                else
+                  assert(debug.getinfo(2, "t").istailcall == false)
+                end
+              end, "c")
+h(false)
+debug.sethook()
+assert(b == 2)   -- two tail calls
 
 lim = 30000
+if _soft then limit = 3000 end
 local function foo (x)
   if x==0 then
-    assert(debug.getinfo(lim+2).what == "main")
-    for i=2,lim do assert(debug.getinfo(i, "S").what == "tail") end
+    assert(debug.getinfo(2).what == "main")
+    local info = debug.getinfo(1)
+    assert(info.istailcall == true and info.func == foo)
   else return foo(x-1)
   end
 end
@@ -380,6 +451,25 @@ foo(lim)
 
 print"+"
 
+
+-- testing local function information
+co = load[[
+  local A = function ()
+    return x
+  end
+  return
+]]
+
+local a = 0
+-- 'A' should be visible to debugger only after its complete definition
+debug.sethook(function (e, l)
+  if l == 3 then a = a + 1; assert(debug.getlocal(2, 1) == "(*temporary)")
+  elseif l == 4 then a = a + 1; assert(debug.getlocal(2, 1) == "A")
+  end
+end, "l")
+co()  -- run local function definition
+debug.sethook()  -- turn off hook
+assert(a == 2)   -- ensure all two lines where hooked
 
 -- testing traceback
 
@@ -391,10 +481,26 @@ assert(not string.find(debug.traceback("hi"), "'traceback'"))
 assert(string.find(debug.traceback("hi", 0), "'traceback'"))
 assert(string.find(debug.traceback(), "^stack traceback:\n"))
 
+
+-- testing nparams, nups e isvararg
+local t = debug.getinfo(print, "u")
+assert(t.isvararg == true and t.nparams == 0 and t.nups == 0)
+
+t = debug.getinfo(function (a,b,c) end, "u")
+assert(t.isvararg == false and t.nparams == 3 and t.nups == 0)
+
+t = debug.getinfo(function (a,b,...) return t[a] end, "u")
+assert(t.isvararg == true and t.nparams == 2 and t.nups == 1)
+
+t = debug.getinfo(1)   -- main
+assert(t.isvararg == true and t.nparams == 0 and t.nups == 1 and
+       debug.getupvalue(t.func, 1) == "_ENV")
+
+
 -- testing debugging of coroutines
 
-local function checktraceback (co, p)
-  local tb = debug.traceback(co)
+local function checktraceback (co, p, level)
+  local tb = debug.traceback(co, nil, level)
   local i = 0
   for l in string.gmatch(tb, "[^\n]+\n?") do
     assert(i == 0 or string.find(l, p[i]))
@@ -405,13 +511,17 @@ end
 
 
 local function f (n)
-  if n > 0 then return f(n-1)
+  if n > 0 then f(n-1)
   else coroutine.yield() end
 end
 
 local co = coroutine.create(f)
 coroutine.resume(co, 3)
-checktraceback(co, {"yield", "db.lua", "tail", "tail", "tail"})
+checktraceback(co, {"yield", "db.lua", "db.lua", "db.lua", "db.lua"})
+checktraceback(co, {"db.lua", "db.lua", "db.lua", "db.lua"}, 1)
+checktraceback(co, {"db.lua", "db.lua", "db.lua"}, 2)
+checktraceback(co, {"db.lua"}, 4)
+checktraceback(co, {}, 40)
 
 
 co = coroutine.create(function (x)
@@ -422,8 +532,8 @@ co = coroutine.create(function (x)
      end)
 
 local tr = {}
-local foo = function (e, l) table.insert(tr, l) end
-debug.sethook(co, foo, "l")
+local foo = function (e, l) if l then table.insert(tr, l) end end
+debug.sethook(co, foo, "lcr")
 
 local _, l = coroutine.resume(co, 10)
 local x = debug.getinfo(co, 1, "lfLS")
@@ -441,7 +551,7 @@ a,b = debug.getlocal(co, 1, 2)
 assert(a == "a" and b == 1)
 debug.setlocal(co, 1, 2, "hi")
 assert(debug.gethook(co) == foo)
-assert(table.getn(tr) == 2 and
+assert(#tr == 2 and
        tr[1] == l.currentline-1 and tr[2] == l.currentline)
 
 a,b,c = pcall(coroutine.resume, co)
@@ -450,7 +560,7 @@ checktraceback(co, {"yield", "in function <"})
 
 a,b = coroutine.resume(co)
 assert(a and b == "hi")
-assert(table.getn(tr) == 4 and tr[4] == l.currentline+2)
+assert(#tr == 4 and tr[4] == l.currentline+2)
 assert(debug.gethook(co) == foo)
 assert(debug.gethook() == nil)
 checktraceback(co, {})
@@ -493,6 +603,28 @@ pcall(co)
 
 
 assert(type(debug.getregistry()) == "table")
+
+
+-- test tagmethod information
+local a = {}
+local function f (t)
+  local info = debug.getinfo(1);
+  assert(info.namewhat == "metamethod")
+  a.op = info.name
+  return info.name
+end
+setmetatable(a, {
+  __index = f; __add = f; __div = f; __mod = f; __concat = f; __pow = f;
+  __eq = f; __le = f; __lt = f;
+})
+
+local b = setmetatable({}, getmetatable(a))
+
+assert(a[3] == "__index" and a^3 == "__pow" and a..a == "__concat")
+assert(a/3 == "__div" and 3%a == "__mod")
+assert (a==b and a.op == "__eq")
+assert (a>=b and a.op == "__le")
+assert (a>b and a.op == "__lt")
 
 
 print"OK"

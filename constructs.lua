@@ -1,4 +1,12 @@
-print "testing syntax"
+;;print "testing syntax";;
+
+local debug = require "debug"
+
+-- testing semicollons
+do ;;; end
+; do ; a = 3; assert(a == 3) end;
+;
+
 
 -- testing priorities
 
@@ -13,6 +21,10 @@ assert(not(2+1 > 3*1) and "a".."b" > "a");
 
 assert(not ((true or false) and nil))
 assert(      true or false  and nil)
+
+-- old bug
+assert((((1 or false) and true) or false) == true)
+assert((((nil and true) or false) and true) == false)
 
 local a,b = 1,nil;
 assert(-(1 or 2) == -1 and (1 and 2)+(-1.25 or -4) == 0.75);
@@ -150,7 +162,7 @@ return function ( a , b , c , d , e )
 end , { a = 1 , b = 2 >= 1 , } or { 1 };
 ]]
 f = string.gsub(f, "%s+", "\n");   -- force a SETLINE between opcodes
-f,a = loadstring(f)();
+f,a = load(f)();
 assert(a.a == 1 and a.b)
 
 function g (a,b,c,d,e)
@@ -202,7 +214,7 @@ function ID(x) return x end
 
 function f(t, i)
   local b = t.n
-  local res = math.mod(math.floor(i/c), b)+1
+  local res = math.fmod(math.floor(i/c), b)+1
   c = c*b
   return t[res]
 end
@@ -231,10 +243,68 @@ repeat
       while %s do WX2 = a; break end
       repeat if (%s) then break end; assert(b)  until not(%s)
   ]], s1, s, s1, s, s1, s, s1, s, s)
-  assert(loadstring(s))()
+  assert(load(s))()
   assert(X and not NX and not WX1 == K and not WX2 == K)
-  if math.mod(i,4000) == 0 then print('+') end
+  if math.fmod(i,4000) == 0 then print('+') end
   i = i+1
 until i==c
+
+print '+'
+
+------------------------------------------------------------------
+print 'testing short-circuit optimizations'
+
+_ENV.GLOB1 = 1
+_ENV.GLOB2 = 2
+
+local basiccases = {
+  {"nil", nil},
+  {"false", false},
+  {"true", true},
+  {"10", 10},
+  {"(_ENV.GLOB1 < _ENV.GLOB2)", true},
+  {"(_ENV.GLOB2 < _ENV.GLOB1)", false},
+}
+
+
+local binops = {
+  {" and ", function (a,b) if not a then return a else return b end end},
+  {" or ", function (a,b) if a then return a else return b end end},
+}
+
+local mem = {basiccases}    -- for memoization
+
+local function allcases (n)
+  if mem[n] then return mem[n] end
+  local res = {}
+  -- include all smaller cases
+  for _, v in ipairs(allcases(n - 1)) do
+    res[#res + 1] = v
+  end
+  for i = 1, n - 1 do
+    for _, v1 in ipairs(allcases(i)) do
+      for _, v2 in ipairs(allcases(n - i)) do
+        for _, op in ipairs(binops) do
+            res[#res + 1] = {
+              "(" .. v1[1] .. op[1] .. v2[1] .. ")",
+              op[2](v1[2], v2[2])
+            }
+        end
+      end
+    end
+    print('+')
+  end
+  mem[n] = res   -- memoize
+  return res
+end
+
+-- do not do too many combinations for soft tests
+local level = _soft and 3 or 4
+
+for _, v in pairs(allcases(level)) do
+  local res = load("return " .. v[1])()
+  assert(res == v[2])
+end
+------------------------------------------------------------------
 
 print'OK'

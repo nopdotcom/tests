@@ -5,9 +5,17 @@ do
   assert(a+b == 5 and -b == -3 and b+"2" == 5 and "10"-c == 0)
   assert(type(a) == 'string' and type(b) == 'string' and type(c) == 'string')
   assert(a == "2" and b == " 3e0 " and c == " 10  " and -c == -"  10 ")
-  assert(c%a == 0 and a^b == 8)
+  assert(c%a == 0 and a^b == 08)
+  a = 0
+  assert(a == -a and 0 == -0)
 end
 
+do
+  local x = -1
+  local mz = 0/x
+  t = {[0] = 10, 20, 30, 40, 50}
+  assert(t[mz] == t[0])
+end
 
 do
   local a,b = math.modf(3.5)
@@ -24,6 +32,16 @@ function f(...)
   end
 end
 
+
+-- testing numeric strings
+
+assert("2" + 1 == 3)
+assert("2 " + 1 == 3)
+assert(" -2 " + 1 == -1)
+assert(" -0xa " + 1 == -9)
+
+
+-- testing 'tonumber'
 assert(tonumber{} == nil)
 assert(tonumber'+0.01' == 1/100 and tonumber'+.01' == 0.01 and
        tonumber'.01' == 0.01    and tonumber'-1.' == -1 and
@@ -31,26 +49,91 @@ assert(tonumber'+0.01' == 1/100 and tonumber'+.01' == 0.01 and
 assert(tonumber'+ 0.01' == nil and tonumber'+.e1' == nil and
        tonumber'1e' == nil     and tonumber'1.0e+' == nil and
        tonumber'.' == nil)
-assert(tonumber('-12') == -10-2)
+assert(tonumber('-012') == -010-2)
 assert(tonumber('-1.2e2') == - - -120)
+
+assert(tonumber("0xffffffffffff") == 2^(4*12) - 1)
+assert(tonumber("0x"..string.rep("f", 150)) == 2^(4*150) - 1)
+assert(tonumber('0x3.' .. string.rep('0', 100)) == 3)
+assert(tonumber('0x0.' .. string.rep('0', 150).."1") == 2^(-4*151))
+
+-- testing 'tonumber' with base
+assert(tonumber('  001010  ', 2) == 10)
+assert(tonumber('  001010  ', 10) == 001010)
+assert(tonumber('  -1010  ', 2) == -10)
+assert(tonumber('10', 36) == 36)
+assert(tonumber('  -10  ', 36) == -36)
+assert(tonumber('  +1Z  ', 36) == 36 + 35)
+assert(tonumber('  -1z  ', 36) == -36 + -35)
+assert(tonumber('-fFfa', 16) == -(10+(16*(15+(16*(15+(16*15)))))))
+assert(tonumber(string.rep('1', 42), 2) + 1 == 2^42)
+assert(tonumber(string.rep('1', 34), 2) + 1 == 2^34)
+assert(tonumber('ffffFFFF', 16)+1 == 2^32)
+assert(tonumber('0ffffFFFF', 16)+1 == 2^32)
+assert(tonumber('-0ffffffFFFF', 16) - 1 == -2^40)
+for i = 2,36 do
+  assert(tonumber('\t10000000000\t', i) == i^10)
+end
+
+-- testing 'tonumber' fo invalid formats
+assert(f(tonumber('fFfa', 15)) == nil)
+assert(f(tonumber('099', 8)) == nil)
+assert(f(tonumber('1\0', 2)) == nil)
+assert(f(tonumber('', 8)) == nil)
+assert(f(tonumber('  ', 9)) == nil)
+assert(f(tonumber('  ', 9)) == nil)
+assert(f(tonumber('0xf', 10)) == nil)
+
+assert(f(tonumber('inf')) == nil)
+assert(f(tonumber(' INF ')) == nil)
+assert(f(tonumber('Nan')) == nil)
+assert(f(tonumber('nan')) == nil)
+
+assert(f(tonumber('  ')) == nil)
+assert(f(tonumber('')) == nil)
 assert(f(tonumber('1  a')) == nil)
+assert(f(tonumber('1\0')) == nil)
+assert(f(tonumber('1 \0')) == nil)
+assert(f(tonumber('1\0 ')) == nil)
 assert(f(tonumber('e1')) == nil)
 assert(f(tonumber('e  1')) == nil)
 assert(f(tonumber(' 3.4.5 ')) == nil)
-assert(f(tonumber('')) == nil)
-assert(f(tonumber('', 8)) == nil)
-assert(f(tonumber('  ')) == nil)
-assert(f(tonumber('  ', 9)) == nil)
-assert(f(tonumber('99', 8)) == nil)
-assert(tonumber('  1010  ', 2) == 10)
-assert(tonumber('10', 36) == 36)
---assert(tonumber('\n  -10  \n', 36) == -36)
---assert(tonumber('-fFfa', 16) == -(10+(16*(15+(16*(15+(16*15)))))))
-assert(tonumber('fFfa', 15) == nil)
---assert(tonumber(string.rep('1', 42), 2) + 1 == 2^42)
-assert(tonumber(string.rep('1', 32), 2) + 1 == 2^32)
---assert(tonumber('-fffffFFFFF', 16)-1 == -2^40)
-assert(tonumber('ffffFFFF', 16)+1 == 2^32)
+
+
+-- testing 'tonumber' for invalid hexadecimal formats
+
+assert(tonumber('0x') == nil)
+assert(tonumber('x') == nil)
+assert(tonumber('x3') == nil)
+assert(tonumber('00x2') == nil)
+assert(tonumber('0x 2') == nil)
+assert(tonumber('0 x2') == nil)
+assert(tonumber('23x') == nil)
+assert(tonumber('- 0xaa') == nil)
+
+
+-- testing hexadecimal numerals
+
+assert(0x10 == 16 and 0xfff == 2^12 - 1 and 0XFB == 251)
+assert(0xFFFFFFFF == 2^32 - 1)
+assert(tonumber('+0x2') == 2)
+assert(tonumber('-0xaA') == -170)
+assert(tonumber('-0xffFFFfff') == -2^32 + 1)
+
+
+-- floating hexas
+
+assert(tonumber('  0x2.5  ') == 0x25/16)
+assert(tonumber('  -0x2.5  ') == -0x25/16)
+assert(tonumber('  +0x0.51p+8  ') == 0x51)
+assert(tonumber('0x0.51p') == nil)
+assert(tonumber('0x5p+-2') == nil)
+assert(0x.FfffFFFF == 1 - '0x.00000001')
+assert('0xA.a' + 0 == 10 + 10/16)
+assert(0xa.aP4 == 0XAA)
+assert(0x4P-2 == 1)
+assert(0x1.1 == '0x1.' + '+0x.1')
+
 
 assert(1.1 == 1.+.1)
 assert(100.0 == 1E2 and .01 == 1e-2)
@@ -68,7 +151,7 @@ assert(0.1e-30 > 0.9E-31 and 0.9E30 < 0.1e31)
 
 assert(0.123456 > 0.123455)
 
-assert(tonumber('+1.23E30') == 1.23*10^30)
+assert(tonumber('+1.23E18') == 1.23*10^18)
 
 -- testing order operators
 assert(not(1<1) and (1<2) and not(2<1))
@@ -100,9 +183,11 @@ assert(math.abs(-10) == 10)
 assert(eq(math.atan2(1,0), math.pi/2))
 assert(math.ceil(4.5) == 5.0)
 assert(math.floor(4.5) == 4.0)
-assert(math.mod(10,3) == 1)
+assert(math.fmod(10,3) == 1)
 assert(eq(math.sqrt(10)^2, 10))
-assert(eq(math.log10(2), math.log(2)/math.log(10)))
+assert(eq(math.log(2, 10), math.log(2)/math.log(10)))
+assert(eq(math.log(2, 2), 1))
+assert(eq(math.log(9, 3), 2))
 assert(eq(math.exp(0), 1))
 assert(eq(math.sin(10), math.sin(10%(2*math.pi))))
 local v,e = math.frexp(math.pi)
@@ -119,51 +204,6 @@ assert(8388609 + -8388609 == 0)
 assert(8388608 + -8388608 == 0)
 assert(8388607 + -8388607 == 0)
 
-if rawget(_G, "_soft") then return end
-
-f = io.tmpfile()
-assert(f)
-f:write("a = {")
-i = 1
-repeat
-  f:write("{", math.sin(i), ", ", math.cos(i), ", ", i/3, "},\n")
-  i=i+1
-until i > 1000
-f:write("}")
-f:seek("set", 0)
-assert(loadstring(f:read('*a')))()
-assert(f:close())
-
-assert(eq(a[300][1], math.sin(300)))
-assert(eq(a[600][1], math.sin(600)))
-assert(eq(a[500][2], math.cos(500)))
-assert(eq(a[800][2], math.cos(800)))
-assert(eq(a[200][3], 200/3))
-assert(eq(a[1000][3], 1000/3, 0.001))
-print('+')
-
-do   -- testing NaN
-  local NaN = 10e500 - 10e400
-  assert(NaN ~= NaN)
-  assert(not (NaN < NaN))
-  assert(not (NaN <= NaN))
-  assert(not (NaN > NaN))
-  assert(not (NaN >= NaN))
-  assert(not (0 < NaN))
-  assert(not (NaN < 0))
-  local a = {}
-  assert(not pcall(function () a[NaN] = 1 end))
-  assert(a[NaN] == nil)
-  a[1] = 1
-  assert(not pcall(function () a[NaN] = 1 end))
-  assert(a[NaN] == nil)
-end
-
-require "checktable"
-stat(a)
-
-a = nil
-
 -- testing implicit convertions
 
 local a,b = '10', '20'
@@ -171,38 +211,69 @@ assert(a*b == 200 and a+b == 30 and a-b == -10 and a/b == 0.5 and -b == -20)
 assert(a == '10' and b == '20')
 
 
-math.randomseed(0)
+if not _port then
+  print("testing -0 and NaN")
+  local mz, z = -0, 0
+  assert(mz == z)
+  assert(1/mz < 0 and 0 < 1/z)
+  local a = {[mz] = 1}
+  assert(a[z] == 1 and a[mz] == 1)
+  local inf = math.huge * 2 + 1
+  mz, z = -1/inf, 1/inf
+  assert(mz == z)
+  assert(1/mz < 0 and 0 < 1/z)
+  local NaN = inf - inf
+  assert(NaN ~= NaN)
+  assert(not (NaN < NaN))
+  assert(not (NaN <= NaN))
+  assert(not (NaN > NaN))
+  assert(not (NaN >= NaN))
+  assert(not (0 < NaN) and not (NaN < 0))
+  local NaN1 = 0/0
+  assert(NaN ~= NaN1 and not (NaN <= NaN1) and not (NaN1 <= NaN))
+  local a = {}
+  assert(not pcall(function () a[NaN] = 1 end))
+  assert(a[NaN] == nil)
+  a[1] = 1
+  assert(not pcall(function () a[NaN] = 1 end))
+  assert(a[NaN] == nil)
+  -- string with same binary representation as 0.0 (may create problems
+  -- for constant manipulation in the pre-compiler)
+  local a1, a2, a3, a4, a5 = 0, 0, "\0\0\0\0\0\0\0\0", 0, "\0\0\0\0\0\0\0\0"
+  assert(a1 == a2 and a2 == a4 and a1 ~= a3)
+  assert(a3 == a5)
+end
 
-local i = 0
-local Max = 0
-local Min = 2
-repeat
-  local t = math.random()
-  Max = math.max(Max, t)
-  Min = math.min(Min, t)
-  i=i+1
-  flag = eq(Max, 1, 0.001) and eq(Min, 0, 0.001)
-until flag or i>10000
-assert(0 <= Min and Max<1)
-assert(flag);
+
+if not _port then
+  print("testing 'math.random'")
+  math.randomseed(0)
+
+  local function aux (x1, x2, p)
+    local Max = -math.huge
+    local Min = math.huge
+    for i = 0, 20000 do
+      local t = math.random(table.unpack(p))
+      Max = math.max(Max, t)
+      Min = math.min(Min, t)
+      if eq(Max, x2, 0.001) and eq(Min, x1, 0.001) then
+        goto ok
+      end
+    end
+    -- loop ended without satisfing condition
+    assert(false)
+   ::ok::
+    assert(x1 <= Min and Max<=x2)
+  end
+
+  aux(0, 1, {})
+  aux(-10, 0, {-10,0})
+end
 
 for i=1,10 do
   local t = math.random(5)
   assert(1 <= t and t <= 5)
 end
-
-i = 0
-Max = -200
-Min = 200
-repeat
-  local t = math.random(-10,0)
-  Max = math.max(Max, t)
-  Min = math.min(Min, t)
-  i=i+1
-  flag = (Max == 0 and Min == -10)
-until flag or i>10000
-assert(-10 <= Min and Max<=0)
-assert(flag);
 
 
 print('OK')
