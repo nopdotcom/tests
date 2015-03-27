@@ -1,4 +1,5 @@
 #!../lua
+-- $Id: all.lua,v 1.91 2014/12/26 17:20:53 roberto Exp $
 
 local version = "Lua 5.3"
 if _VERSION ~= version then
@@ -10,13 +11,13 @@ end
 
 -- next variables control the execution of some tests
 -- true means no test (so an undefined variable does not skip a test)
--- defaults are for Linux; test everything
-
-_soft = false      -- true to avoid long or memory consuming tests
-_port = false      -- true to avoid non-portable tests
-_nomsg = false     -- true to avoid messages about tests not performed
-_noposix = false   -- false assumes LUA_USE_POSIX
-_noformatA = false   -- false assumes LUA_USE_AFORMAT
+-- defaults are for Linux; test everything.
+-- Make true to avoid long or memory consuming tests
+_soft = rawget(_G, "_soft") or false
+-- Make true to avoid non-portable tests
+_port = rawget(_G, "_port") or false
+-- Make true to avoid messages about tests not performed
+_nomsg = rawget(_G, "_nomsg") or false
 
 
 local usertests = rawget(_G, "_U")
@@ -26,18 +27,18 @@ if usertests then
   _soft = true
   _port = true
   _nomsg = true
-  _noposix = true
-  _noformatA = true; 
 end
 
--- no "internal" tests for user tests
-if usertests then T = nil end
+-- tests should require debug when needed
+debug = nil
 
-T = rawget(_G, "T")  -- avoid problems with 'strict' module
+if usertests then
+  T = nil    -- no "internal" tests for user tests
+else
+  T = rawget(_G, "T")  -- avoid problems with 'strict' module
+end
 
 math.randomseed(0)
-
-
 
 --[=[
   example of a long [comment],
@@ -48,7 +49,8 @@ math.randomseed(0)
 print("current path:\n****" .. package.path .. "****\n")
 
 
-local c = os.clock()
+local initclock = os.clock()
+local lastclock = initclock
 local walltime = os.time()
 
 local collectgarbage = collectgarbage
@@ -115,9 +117,11 @@ end
 --
 local function report (n) print("\n***** FILE '"..n.."'*****") end
 local olddofile = dofile
-dofile = function (n, strip)
+local dofile = function (n, strip)
   showmem()
-  print("time :", os.clock() - c)
+  local c = os.clock()
+  print(string.format("time: %g (+%g)", c - initclock, c - lastclock))
+  lastclock = c
   report(n)
   local f = assert(loadfile(n))
   local b = string.dump(f, strip)
@@ -148,6 +152,7 @@ dofile('db.lua')
 assert(dofile('calls.lua') == deep and deep)
 olddofile('strings.lua')
 olddofile('literals.lua')
+dofile('tpack.lua')
 assert(dofile('attrib.lua') == 27)
 
 assert(dofile('locals.lua') == 5)
@@ -183,11 +188,13 @@ if #msgs > 0 then
   print()
 end
 
+-- no test module should define 'debug'
+assert(debug == nil)
+
 local debug = require "debug"
 
 print(string.format("%d-bit integers, %d-bit floats",
-        debug.Csize'I' * debug.Csize'b', debug.Csize'F' * debug.Csize'b'))
-print("final OK !!!")
+        string.packsize("j") * 8, string.packsize("n") * 8))
 
 debug.sethook(function (a) assert(type(a) == 'string') end, "cr")
 
@@ -230,7 +237,7 @@ collectgarbage()
 collectgarbage()
 collectgarbage();showmem()
 
-local clocktime = clock() - c
+local clocktime = clock() - initclock
 walltime = time() - walltime
 
 print(format("\n\ntotal time: %.2fs (wall time: %ds)\n", clocktime, walltime))
@@ -246,4 +253,6 @@ if not usertests then
   end
   assert(open(fname, "w")):write(clocktime):close()
 end
+
+print("final OK !!!")
 

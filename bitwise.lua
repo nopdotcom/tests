@@ -1,18 +1,14 @@
+-- $Id: bitwise.lua,v 1.24 2014/12/26 17:20:53 roberto Exp $
+
 print("testing bitwise operations")
 
-local Csize = require'debug'.Csize
-
-local numbits = Csize'I' * Csize'b'
+local numbits = string.packsize('j') * 8
 
 assert(~0 == -1)
 
--- test 'Csize'
-assert(Csize'h' <= Csize'i')    -- ANSI C rules
-assert(Csize'i' <= Csize'l')    -- ANSI C rules
-assert(Csize'f' <= Csize'd')    -- ANSI C rules
-assert(type(Csize'z') == 'number')   -- no rules for size_t...
-assert(not pcall(Csize, 'x'))
+assert((1 << (numbits - 1)) == math.mininteger)
 
+-- basic tests for bitwise operators;
 -- use variables to avoid constant folding
 local a, b, c, d
 a = 0xFFFFFFFFFFFFFFFF
@@ -24,7 +20,7 @@ assert(a >> 4 == ~a)
 a = 0xF0; b = 0xCC; c = 0xAA; d = 0xFD
 assert(a | b ~ c & d == 0xF4)
 
-a = 0xF0.3; b = 0xCC.23; c = 0xAA.1; d = 0xFD.4
+a = 0xF0.0; b = 0xCC.0; c = "0xAA.0"; d = "0xFD.0"
 assert(a | b ~ c & d == 0xF4)
 
 a = 0xF0000000; b = 0xCC000000;
@@ -140,9 +136,7 @@ end
 function bit.lrotate (a ,b)
   b = b & 31
   a = a & 0xFFFFFFFF
-  if b ~= 0 then
-    a = (a << b) | (a >> (32 - b))
-  end
+  a = (a << b) | (a >> (32 - b))
   return a & 0xFFFFFFFF
 end
 
@@ -201,6 +195,8 @@ assert(bit32.band((1 << 40) - 4) == 0xfffffffc)
 
 assert(bit32.lrotate(0, -1) == 0)
 assert(bit32.lrotate(0, 7) == 0)
+assert(bit32.lrotate(0x12345678, 0) == 0x12345678)
+assert(bit32.lrotate(0x12345678, 32) == 0x12345678)
 assert(bit32.lrotate(0x12345678, 4) == 0x23456781)
 assert(bit32.rrotate(0x12345678, -4) == 0x23456781)
 assert(bit32.lrotate(0x12345678, -8) == 0x78123456)
@@ -316,15 +312,15 @@ assert(bit32.replace(-1, 0, 1, 2) == (1 << 32) - 7)
 
 -- testing conversion of floats
 
-assert(bit32.bor(3.9) == 3)
-assert(bit32.bor(-3.9) == 0xfffffffc)
+assert(bit32.bor(3.0) == 3)
+assert(bit32.bor(-4.0) == 0xfffffffc)
 
 -- large floats and large-enough integers?
 if 2.0^50 < 2.0^50 + 1.0 and 2.0^50 < (-1 >> 1) then
-  assert(bit32.bor(2.0^32 - 4.9) == 0xfffffffb)
-  assert(bit32.bor(-2.0^32 - 5.8) == 0xfffffffa)
-  assert(bit32.bor(2.0^48 - 4.5) == 0xfffffffb)
-  assert(bit32.bor(-2.0^48 - 5.5) == 0xfffffffa)
+  assert(bit32.bor(2.0^32 - 5.0) == 0xfffffffb)
+  assert(bit32.bor(-2.0^32 - 6.0) == 0xfffffffa)
+  assert(bit32.bor(2.0^48 - 5.0) == 0xfffffffb)
+  assert(bit32.bor(-2.0^48 - 6.0) == 0xfffffffa)
 end
 
 print'OK'

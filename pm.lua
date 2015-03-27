@@ -1,4 +1,12 @@
+-- $Id: pm.lua,v 1.43 2014/12/26 17:20:53 roberto Exp $
+
 print('testing pattern matching')
+
+local function checkerror (msg, f, ...)
+  local s, err = pcall(f, ...)
+  assert(not s and string.find(err, msg))
+end
+
 
 function f(s, p)
   local i,e = string.find(s, p)
@@ -167,8 +175,9 @@ assert(string.gsub("trocar tudo em |teste|b| é |beleza|al|", "|([^|]*)|([^|]*)|"
             "trocar tudo em bbbbb é alalalalalal")
 
 local function dostring (s) return load(s)() or "" end
-assert(string.gsub("alo $a=1$ novamente $return a$", "$([^$]*)%$", dostring) ==
-            "alo  novamente 1")
+assert(string.gsub("alo $a='x'$ novamente $return a$",
+                   "$([^$]*)%$",
+                   dostring) == "alo  novamente x")
 
 x = string.gsub("$x=string.gsub('alo', '.', string.upper)$ assim vai para $return x$",
          "$([^$]*)%$", dostring)
@@ -205,12 +214,12 @@ assert(string.gsub("first second word", "%w+",
          function (w) t.n=t.n+1; t[t.n] = w end, 2) == "first second word")
 assert(t[1] == "first" and t[2] == "second" and t[3] == nil)
 
-assert(not pcall(string.gsub, "alo", "(.", print))
-assert(not pcall(string.gsub, "alo", ".)", print))
-assert(not pcall(string.gsub, "alo", "(.", {}))
-assert(not pcall(string.gsub, "alo", "(.)", "%2"))
-assert(not pcall(string.gsub, "alo", "(%1)", "a"))
-assert(not pcall(string.gsub, "alo", "(%0)", "a"))
+checkerror("invalid replacement value %(a table%)",
+            string.gsub, "alo", ".", {a = {}})
+checkerror("invalid capture index %%2", string.gsub, "alo", ".", "%2")
+checkerror("invalid capture index %%0", string.gsub, "alo", "(%0)", "a")
+checkerror("invalid capture index %%1", string.gsub, "alo", "(%1)", "a")
+checkerror("invalid use of '%%'", string.gsub, "alo", ".", "%x")
 
 -- bug since 2.5 (C-stack overflow)
 do
@@ -252,7 +261,7 @@ assert(string.gsub("alo alo", "(.)", {a="AA", l=""}) == "AAo AAo")
 assert(string.gsub("alo alo", "(.).", {a="AA", l="K"}) == "AAo AAo")
 assert(string.gsub("alo alo", "((.)(.?))", {al="AA", o=false}) == "AAo AAo")
 
-assert(string.gsub("alo alo", "().", {2,5,6}) == "256 alo")
+assert(string.gsub("alo alo", "().", {'x','yy','zzz'}) == "xyyzzz alo")
 
 t = {}; setmetatable(t, {__index = function (t,s) return string.upper(s) end})
 assert(string.gsub("a alo b hi", "%w%w+", t) == "a ALO b HI")
@@ -277,7 +286,7 @@ assert(#t == 0)
 
 t = {}
 for i,j in string.gmatch("13 14 10 = 11, 15= 16, 22=23", "(%d+)%s*=%s*(%d+)") do
-  t[i] = j
+  t[tonumber(i)] = tonumber(j)
 end
 a = 0
 for k,v in pairs(t) do assert(k+1 == v+0); a=a+1 end
@@ -320,6 +329,8 @@ local function malform (p, m)
   assert(not r and string.find(msg, m))
 end
 
+malform("(.", "unfinished capture")
+malform(".)", "invalid pattern capture")
 malform("[a")
 malform("[]")
 malform("[^]")

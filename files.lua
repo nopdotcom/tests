@@ -1,3 +1,5 @@
+-- $Id: files.lua,v 1.84 2014/12/26 17:20:53 roberto Exp $
+
 local debug = require "debug"
 
 assert(type(os.getenv"PATH") == "string")
@@ -5,6 +7,12 @@ assert(type(os.getenv"PATH") == "string")
 assert(io.input(io.stdin) == io.stdin)
 assert(not pcall(io.input, "non-existent-file"))
 assert(io.output(io.stdout) == io.stdout)
+
+local function checkerr (msg, f, ...)
+  local stat, err = pcall(f, ...)
+  assert(not stat and string.find(err, msg))
+end
+
 
 -- cannot close standard files
 assert(not io.close(io.stdin) and
@@ -14,9 +22,9 @@ assert(not io.close(io.stdin) and
 
 assert(type(io.input()) == "userdata" and io.type(io.output()) == "file")
 assert(type(io.stdin) == "userdata" and io.type(io.stderr) == "file")
-assert(io.type(8) == nil)
+assert(not io.type(8))
 local a = {}; setmetatable(a, {})
-assert(io.type(a) == nil)
+assert(not io.type(a))
 
 assert(getmetatable(io.input()).__name == "FILE*")
 
@@ -38,12 +46,12 @@ print('testing i/o')
 
 local otherfile = os.tmpname()
 
-assert(not pcall(io.open, file, "rw"))     -- invalid mode
-assert(not pcall(io.open, file, "rb+"))    -- invalid mode
-assert(not pcall(io.open, file, "r+bk"))   -- invalid mode
-assert(not pcall(io.open, file, ""))       -- invalid mode
-assert(not pcall(io.open, file, "+"))      -- invalid mode
-assert(not pcall(io.open, file, "b"))      -- invalid mode
+checkerr("invalid mode", io.open, file, "rw")
+checkerr("invalid mode", io.open, file, "rb+")
+checkerr("invalid mode", io.open, file, "r+bk")
+checkerr("invalid mode", io.open, file, "")
+checkerr("invalid mode", io.open, file, "+")
+checkerr("invalid mode", io.open, file, "b")
 assert(io.open(file, "r+b")):close()
 assert(io.open(file, "r+")):close()
 assert(io.open(file, "rb")):close()
@@ -53,10 +61,16 @@ assert(os.setlocale('C', 'all'))
 io.input(io.stdin); io.output(io.stdout);
 
 os.remove(file)
-assert(loadfile(file) == nil)
-assert(io.open(file) == nil)
+assert(not loadfile(file))
+checkerr("", dofile, file)
+assert(not io.open(file))
 io.output(file)
 assert(io.output() ~= io.stdout)
+
+if not _port then   -- invalid seek
+  local status, msg, code = io.stdin:seek("set", 1000)
+  assert(not status and type(msg) == "string" and type(code) == "number")
+end
 
 assert(io.output():seek() == 0)
 assert(io.write("alo alo"):seek() == string.len("alo alo"))
@@ -88,7 +102,7 @@ io.input():close()
 io.close()
 
 assert(os.rename(file, otherfile))
-assert(os.rename(file, otherfile) == nil)
+assert(not os.rename(file, otherfile))
 
 io.output(io.open(otherfile, "ab"))
 assert(io.write("\n\n\t\t  ", 3450, "\n"));
@@ -159,28 +173,36 @@ assert(os.remove(file))
 assert(not pcall(io.lines, "non-existent-file"))
 assert(os.rename(otherfile, file))
 io.output(otherfile)
+local n = 0
 local f = io.lines(file)
-while f() do end;
-assert(not pcall(f))  -- read lines after EOF
-assert(not pcall(f))  -- read lines after EOF
+while f() do n = n + 1 end;
+assert(n == 6)   -- number of lines in the file
+checkerr("file is already closed", f)
+checkerr("file is already closed", f)
 -- copy from file to otherfile
-for l in io.lines(file) do io.write(l, "\n") end
+n = 0
+for l in io.lines(file) do io.write(l, "\n"); n = n + 1 end
 io.close()
+assert(n == 6)
 -- copy from otherfile back to file
 local f = assert(io.open(otherfile))
 assert(io.type(f) == "file")
 io.output(file)
-assert(io.output():read() == nil)
-for l in f:lines() do io.write(l, "\n") end
+assert(not io.output():read())
+n = 0
+for l in f:lines() do io.write(l, "\n"); n = n + 1 end
 assert(tostring(f):sub(1, 5) == "file ")
 assert(f:close()); io.close()
-assert(not pcall(io.close, f))   -- error trying to close again
+assert(n == 6)
+checkerr("closed file", io.close, f)
 assert(tostring(f) == "file (closed)")
 assert(io.type(f) == "closed file")
 io.input(file)
 f = io.open(otherfile):lines()
-for l in io.lines() do assert(l == f()) end
+n = 0
+for l in io.lines() do assert(l == f()); n = n + 1 end
 f = nil; collectgarbage()
+assert(n == 6)
 assert(os.remove(otherfile))
 
 io.input(file)
@@ -188,6 +210,7 @@ do  -- test error returns
   local a,b,c = io.input():write("xuxu")
   assert(not a and type(b) == "string" and type(c) == "number")
 end
+checkerr("invalid format", io.read, "x")
 assert(io.read(0) == "")   -- not eof
 assert(io.read(5, 'l') == '"álo"')
 assert(io.read(0) == "")
@@ -216,7 +239,7 @@ assert(io.read('a') == '')  -- end of file (OK for 'a')
 collectgarbage()
 print('+')
 io.close(io.input())
-assert(not pcall(io.read))
+checkerr(" input file is closed", io.read)
 
 assert(os.remove(file))
 
@@ -227,7 +250,7 @@ assert(string.len(t) == 10*2^10)
 io.output(file)
 io.write("alo"):write("\n")
 io.close()
-assert(not pcall(io.write))
+checkerr(" output file is closed", io.write)
 local f = io.open(file, "a+b")
 io.output(f)
 collectgarbage()
@@ -259,12 +282,12 @@ do
   -- read
   local f = io.open(file, "w")
   local r, m, c = f:read()
-  assert(r == nil and ismsg(m) and type(c) == "number")
+  assert(not r and ismsg(m) and type(c) == "number")
   assert(f:close())
   -- write
   f = io.open(file, "r")
   r, m, c = f:write("whatever")
-  assert(r == nil and ismsg(m) and type(c) == "number")
+  assert(not r and ismsg(m) and type(c) == "number")
   assert(f:close())
   -- lines
   f = io.open(file, "w")
@@ -315,7 +338,7 @@ assert(t.a == -((10 + 34) * 2))
 io.output(file); io.write"0123456789\n":close()
 for a,b in io.lines(file, 1, 1) do
   if a == "\n" then assert(b == nil)
-  else assert(tonumber(a) == b - 1)
+  else assert(tonumber(a) == tonumber(b) - 1)
   end
 end
 
@@ -370,8 +393,8 @@ assert(loadfile(file))()
 assert(x1 == x2)
 print('+')
 assert(os.remove(file))
-assert(os.remove(file) == nil)
-assert(os.remove(otherfile) == nil)
+assert(not os.remove(file))
+assert(not os.remove(otherfile))
 
 -- testing loadfile
 local function testloadfile (s, expres)
@@ -397,7 +420,7 @@ testloadfile("\xEF\xBB\xBF", nil)   -- empty file with a BOM
 
 
 -- checking line numbers in files with initial comments
-testloadfile("# a comment\nreturn debug.getinfo(1).currentline", 2)
+testloadfile("# a comment\nreturn require'debug'.getinfo(1).currentline", 2)
 
 
 -- loading binary file
@@ -564,7 +587,7 @@ if not _soft then
   x = nil; y = nil
 end
 
-if not _noposix then
+if not _port then
   print("testing popen/pclose and execute")
   local tests = {
     -- command,   what,  code
@@ -583,9 +606,9 @@ if not _noposix then
     local x1, y1, z1 = os.execute(v[1])
     assert(x == x1 and y == y1 and z == z1)
     if v[2] == "ok" then
-      assert(x == true and y == 'exit' and z == 0)
+      assert(x and y == 'exit' and z == 0)
     else
-      assert(x == nil and y == v[2])   -- correct status and 'what'
+      assert(not x and y == v[2])   -- correct status and 'what'
       -- correct code if known (but always different from 0)
       assert((v[3] == nil and z > 0) or v[3] == z)
     end
@@ -627,7 +650,8 @@ assert(not pcall(os.date, "%O"))   -- invalid conversion specifier
 assert(not pcall(os.date, "%E"))   -- invalid conversion specifier
 assert(not pcall(os.date, "%Ea"))   -- invalid conversion specifier
 
-if not _noposix then
+if not _port then
+  -- test Posix-specific modifiers
   assert(type(os.date("%Ex")) == 'string')
   assert(type(os.date("%Oy")) == 'string')
 end
@@ -664,13 +688,13 @@ local t2 = os.time{year=2000, month=10, day=1, hour=23, min=10, sec=19}
 assert(os.difftime(t1,t2) == 60*2-19)
 
 io.output(io.stdout)
-local d = os.date('%d')
-local m = os.date('%m')
-local a = os.date('%Y')
-local ds = os.date('%w') + 1
-local h = os.date('%H')
-local min = os.date('%M')
-local s = os.date('%S')
+local d = tonumber(os.date('%d'))
+local m = tonumber(os.date('%m'))
+local a = tonumber(os.date('%Y'))
+local ds = tonumber(os.date('%w')) + 1
+local h = tonumber(os.date('%H'))
+local min = tonumber(os.date('%M'))
+local s = tonumber(os.date('%S'))
 io.write(string.format('test done on %2.2d/%2.2d/%d', d, m, a))
 io.write(string.format(', at %2.2d:%2.2d:%2.2d\n', h, min, s))
 io.write(string.format('%s\n', _VERSION))

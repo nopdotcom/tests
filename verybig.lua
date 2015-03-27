@@ -1,3 +1,5 @@
+-- $Id: verybig.lua,v 1.24 2014/12/26 17:20:53 roberto Exp $
+
 print "testing RK"
 
 -- testing opcodes with RK arguments larger than K limit

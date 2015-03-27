@@ -1,3 +1,5 @@
+-- $Id: calls.lua,v 1.56 2014/12/26 17:20:53 roberto Exp $
+
 print("testing functions and calls")
 
 local debug = require "debug"
@@ -15,6 +17,21 @@ assert(type(nil) == 'nil'
 assert(type(assert) == type(print))
 function f (x) return a:x (x) end
 assert(type(f) == 'function')
+
+
+do    -- test error in 'print' too...
+  local tostring = _ENV.tostring
+
+  _ENV.tostring = nil
+  local st, msg = pcall(print, 1)
+  assert(st == false and string.find(msg, "attempt to call a nil value"))
+
+  _ENV.tostring = function () return {} end
+  local st, msg = pcall(print, 1)
+  assert(st == false and string.find(msg, "must return a string"))
+  
+  _ENV.tostring = tostring
+end
 
 
 -- testing local-function recursion
@@ -291,7 +308,7 @@ x = load(string.dump(function (x)
   if x == "set" then a = 10+b; b = b+1 else
   return a
   end
-end))
+end), "", "b", nil)
 assert(x() == nil)
 assert(debug.setupvalue(x, 1, "hi") == "a")
 assert(x() == "hi")
@@ -330,6 +347,43 @@ end
 assert((function () return nil end)(4) == nil)
 assert((function () local a; return a end)(4) == nil)
 assert((function (a) return a end)() == nil)
+
+
+print("testing binary chunks")
+do
+  local header = string.pack("c4BBc6BBBBBj",
+    "\27Lua",                -- signature
+    5*16 + 3,                -- version 5.3
+    0,                       -- format
+    "\x19\x93\r\n\x1a\n",    -- data
+    string.packsize("i"),    -- sizeof(int)
+    string.packsize("T"),    -- sizeof(size_t)
+    4,                       -- size of instruction
+    string.packsize("j"),    -- sizeof(lua integer)
+    string.packsize("n"),    -- sizeof(lua number)
+    0x5678                   -- LUAC_INT
+    -- LUAC_NUM may not have a unique binary representation (padding...)
+  )
+  local c = string.dump(function () local a = 1; local b = 3; return a+b*3 end)
+
+  assert(string.sub(c, 1, #header) == header)
+
+  -- corrupted header
+  for i = 1, #header do
+    local s = string.sub(c, 1, i - 1) ..
+              string.char(string.byte(string.sub(c, i, i)) + 1) ..
+              string.sub(c, i + 1, -1)
+    assert(#s == #c)
+    assert(not load(s))
+  end
+
+  -- loading truncated binary chunks
+  for i = 1, #c - 1 do
+    local st, msg = load(string.sub(c, 1, i))
+    assert(not st and string.find(msg, "truncated"))
+  end
+  assert(assert(load(c))() == 10)
+end
 
 print('OK')
 return deep

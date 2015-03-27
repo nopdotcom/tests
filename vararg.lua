@@ -1,3 +1,5 @@
+-- $Id: vararg.lua,v 1.22 2014/12/26 17:20:53 roberto Exp $
+
 print('testing vararg')
 
 _G.arg = nil

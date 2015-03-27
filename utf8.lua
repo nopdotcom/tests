@@ -1,6 +1,14 @@
+-- $Id: utf8.lua,v 1.11 2014/12/26 17:20:53 roberto Exp $
+
 print "testing UTF-8 library"
 
 local utf8 = require'utf8'
+
+
+local function checkerror (msg, f, ...)
+  local s, err = pcall(f, ...)
+  assert(not s and string.find(err, msg))
+end
 
 
 local function len (s)
@@ -8,7 +16,7 @@ local function len (s)
 end
 
 
-local justone = "^" .. utf8.charpatt .. "$"
+local justone = "^" .. utf8.charpattern .. "$"
 
 -- 't' is the list of codepoints of 's'
 local function checksyntax (s, t)
@@ -19,6 +27,8 @@ local function checksyntax (s, t)
   assert(assert(load(ts))() == s)
 end
 
+assert(utf8.offset("alo", 5) == nil)
+assert(utf8.offset("alo", -4) == nil)
 
 -- 't' is the list of codepoints of 's'
 local function check (s, t)
@@ -45,7 +55,7 @@ local function check (s, t)
       assert(utf8.offset(s, 0, j) == pi)
     end
     for j = pi + 1, pi1 - 1 do
-      assert(utf8.len(s, j) == nil)
+      assert(not utf8.len(s, j))
     end
    assert(utf8.len(s, pi, pi) == 1)
    assert(utf8.len(s, pi, pi1 - 1) == 1)
@@ -70,7 +80,7 @@ local function check (s, t)
   assert(i == #t)
 
   i = 0
-  for c in string.gmatch(s, utf8.charpatt) do
+  for c in string.gmatch(s, utf8.charpattern) do
     i = i + 1
     assert(c == utf8.char(t[i]))
   end
@@ -94,14 +104,22 @@ do    -- error indication in utf8.len
   check("\xF4\x9F\xBF\xBF", 1)
 end
 
+-- error in utf8.codes
+checkerror("invalid UTF%-8 code",
+  function ()
+    local s = "ab\xff"
+    for c in utf8.codes(s) do assert(c) end
+  end)
+
+
 -- error in initial position for offset
-assert(not pcall(utf8.offset, "abc", 1, 5))
-assert(not pcall(utf8.offset, "abc", 1, -4))
-assert(not pcall(utf8.offset, "", 1, 2))
-assert(not pcall(utf8.offset, "", 1, -1))
-assert(not pcall(utf8.offset, "𦧺", 1, 2))   -- continuation byte
-assert(not pcall(utf8.offset, "𦧺", 1, 2))   -- continuation byte
-assert(not pcall(utf8.offset, "\x80", 1))    -- continuation byte
+checkerror("position out of range", utf8.offset, "abc", 1, 5)
+checkerror("position out of range", utf8.offset, "abc", 1, -4)
+checkerror("position out of range", utf8.offset, "", 1, 2)
+checkerror("position out of range", utf8.offset, "", 1, -1)
+checkerror("continuation byte", utf8.offset, "𦧺", 1, 2)
+checkerror("continuation byte", utf8.offset, "𦧺", 1, 2)
+checkerror("continuation byte", utf8.offset, "\x80", 1)
 
 
 
@@ -116,7 +134,12 @@ do
   local s = "áéí\128"
   local t = {utf8.codepoint(s,1,#s - 1)}
   assert(#t == 3 and t[1] == 225 and t[2] == 233 and t[3] == 237)
-  assert(not pcall(utf8.codepoint, s, 1, #s))
+  checkerror("invalid UTF%-8 code", utf8.codepoint, s, 1, #s)
+  checkerror("out of range", utf8.codepoint, s, #s + 1)
+  t = {utf8.codepoint(s, 4, 3)}
+  assert(#t == 0)
+  checkerror("out of range", utf8.codepoint, s, -(#s + 1), 1)
+  checkerror("out of range", utf8.codepoint, s, 1, #s + 1)
 end
 
 assert(utf8.char() == "")
@@ -124,12 +147,11 @@ assert(utf8.char(97, 98, 99) == "abc")
 
 assert(utf8.codepoint(utf8.char(0x10FFFF)) == 0x10FFFF)
 
--- value out fo valid range
-assert(not pcall(utf8.char, 0x10FFFF + 1))
+checkerror("value out of range", utf8.char, 0x10FFFF + 1)
 
 local function invalid (s)
-  assert(not pcall(utf8.codepoint, s))
-  assert(utf8.len(s) == nil)
+  checkerror("invalid UTF%-8 code", utf8.codepoint, s)
+  assert(not utf8.len(s))
 end
 
 -- UTF-8 representation for 0x11ffff (value out of valid range)
@@ -173,7 +195,7 @@ check("𨳊𩶘𦧺𨳒𥄫𤓓\xF4\x8F\xBF\xBF",
 
 
 local i = 0
-for p, c in string.gmatch(x, "()(" .. utf8.charpatt .. ")") do
+for p, c in string.gmatch(x, "()(" .. utf8.charpattern .. ")") do
   i = i + 1
   assert(utf8.offset(x, i) == p)
   assert(utf8.len(x, p) == utf8.len(x) - i + 1)

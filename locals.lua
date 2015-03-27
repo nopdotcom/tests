@@ -1,3 +1,5 @@
+-- $Id: locals.lua,v 1.35 2014/12/26 17:20:53 roberto Exp $
+
 print('testing local variables and environments')
 
 local debug = require"debug"

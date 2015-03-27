@@ -1,4 +1,8 @@
+-- $Id: events.lua,v 1.41 2014/12/26 17:20:53 roberto Exp $
+
 print('testing metatables')
+
+local debug = require'debug'
 
 X = 20; B = 30
 
@@ -275,7 +279,7 @@ assert(t[Set{1,3,5}] == nil)
 
 
 if not T then
-  (Message or print)('\n >>> testC not active: zkipping tests for \z
+  (Message or print)('\n >>> testC not active: skipping tests for \z
 userdata equality <<<\n')
 else
   local u1 = T.newuserdata(0)
@@ -384,13 +388,13 @@ assert(a.x == 1 and rawget(a, "x", 3) == 1)
 print '+'
 
 -- testing metatables for basic types
-local debug = require'debug'
-mt = {}
+mt = {__index = function (a,b) return a+b end,
+      __len = function (x) return math.floor(x) end}
 debug.setmetatable(10, mt)
 assert(getmetatable(-2) == mt)
-mt.__index = function (a,b) return a+b end
 assert((10)[3] == 13)
 assert((10)["3"] == 13)
+assert(#3.45 == 3)
 debug.setmetatable(23, nil)
 assert(getmetatable(-2) == nil)
 

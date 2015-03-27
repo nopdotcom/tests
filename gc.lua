@@ -1,3 +1,5 @@
+-- $Id: gc.lua,v 1.69 2014/12/26 17:20:53 roberto Exp $
+
 print('testing garbage collection')
 
 local debug = require"debug"
@@ -48,7 +50,7 @@ local function GC1 ()
 
   finish = false; local i = 1
   u = setmetatable({}, {__gc = function () finish = true end})
-  repeat i = i + 1; u = i .. i until finish
+  repeat i = i + 1; u = tostring(i) .. tostring(i) until finish
   assert(b[1] == 34)   -- 'u' was collected, but 'b' was not
 
   finish = false
@@ -67,7 +69,7 @@ local function GC2 ()
 
   finish = false; local i = 1
   u = {setmetatable({}, {__gc = function () finish = true end})}
-  repeat i = i + 1; u = {i .. i} until finish
+  repeat i = i + 1; u = {tostring(i) .. tostring(i)} until finish
   assert(b[1] == 34)   -- 'u' was collected, but 'b' was not
 
   finish = false
@@ -158,14 +160,6 @@ assert(_G["while"] == 234)
 
 
 print("steps")
-
-local bytes = gcinfo()
-while 1 do
-  local nbytes = gcinfo()
-  if nbytes < bytes then break end   -- run until gc
-  bytes = nbytes
-  a = {}
-end
 
 print("steps (2)")
 
@@ -313,7 +307,7 @@ C, C1 = nil
 
 -- ephemerons
 local mt = {__mode = 'k'}
-a = {10,20,30,40}; setmetatable(a, mt)
+a = {{10},{20},{30},{40}}; setmetatable(a, mt)
 x = nil
 for i = 1, 100 do local n = {}; a[n] = {k = {x}}; x = n end
 GC()
@@ -323,7 +317,7 @@ while n do n = a[n].k[1]; i = i + 1 end
 assert(i == 100)
 x = nil
 GC()
-for i = 1, 4 do assert(a[i] == i * 10); a[i] = nil end
+for i = 1, 4 do assert(a[i][1] == i * 10); a[i] = nil end
 assert(next(a) == nil)
 
 local K = {}
@@ -547,6 +541,19 @@ if T then   -- tests for weird cases collecting upvalues
   assert(t.co == nil and f() == 30)   -- ensure correct access to 'a'
 
   collectgarbage("restart")
+
+  -- test barrier in sweep phase (advance cleaning of upvalue to white)
+  local u = T.newuserdata(0)   -- create a userdata
+  collectgarbage()
+  collectgarbage"stop"
+  T.gcstate"atomic"
+  local x = {}
+  T.gcstate"sweepallgc"
+  assert(T.gccolor(u) == "black")   -- upvalue is "old" (black)
+  assert(T.gccolor(x) == "white")   -- table is "new" (white)
+  debug.setuservalue(u, x)          -- trigger barrier
+  assert(T.gccolor(u) == "white")   -- upvalue changed to white
+  collectgarbage"restart"
 
   print"+"
 end

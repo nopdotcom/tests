@@ -1,3 +1,5 @@
+-- $Id: coroutine.lua,v 1.37 2014/12/26 17:20:53 roberto Exp $
+
 print "testing coroutines"
 
 local debug = require'debug'
@@ -10,6 +12,10 @@ assert(not coroutine.resume(main))
 assert(not coroutine.isyieldable())
 assert(not pcall(coroutine.yield))
 
+
+-- trivial errors
+assert(not pcall(coroutine.resume, 0))
+assert(not pcall(coroutine.status, 0))
 
 
 -- tests for multiple yield/resume arguments
@@ -728,7 +734,7 @@ co = coroutine.wrap(function (...) return
        [[  # 3th continuation
           pushvalue 6   # function which is last arg. to 'testC' here
           pushnum 10; pushnum 20;
-          pcall 2 0     # call should throw an error and return to next line
+          pcall 2 0 0   # call should throw an error and return to next line
           pop 1		# remove error message
           pushvalue 6
           getglobal status; getglobal ctx

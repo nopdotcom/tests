@@ -1,3 +1,5 @@
+-- $Id: math.lua,v 1.69 2015/01/05 18:41:54 roberto Exp $
+
 print("testing numbers and math lib")
 
 local minint = math.mininteger
@@ -28,8 +30,16 @@ do
                        intbits, floatbits))
 end
 
-assert(math.type(0) == "integer" and math.type(0.0) == "float")
+assert(math.type(0) == "integer" and math.type(0.0) == "float"
+       and math.type("10") == nil)
 
+
+local function checkerror (msg, f, ...)
+  local s, err = pcall(f, ...)
+  assert(not s and string.find(err, msg))
+end
+
+local msgf2i = "number.* has no integer representation"
 
 -- float equality
 function eq (a,b,limit)
@@ -102,35 +112,24 @@ assert(minint * minint == 0)
 assert(maxint * maxint * maxint == maxint)
 
 
--- testing integer division and conversions
+-- testing floor division and conversions
 
 for _, i in pairs{-16, -15, -3, -2, -1, 0, 1, 2, 3, 15} do
   for _, j in pairs{-16, -15, -3, -2, -1, 1, 2, 3, 15} do
-    local iq, fq = i // j, i / j
-    assert(iq == math.floor(fq))
+    for _, ti in pairs{0, 0.0} do     -- try 'i' as integer and as float
+      for _, tj in pairs{0, 0.0} do   -- try 'j' as integer and as float
+        local x = i + ti
+        local y = j + tj
+          assert(i//j == math.floor(i/j))
+      end
+    end
   end
 end
 
-
--- negative exponents
-do
-  assert(2^-3 == 1 / 2^3)
-  assert(eq((-3)^-3, 1 / (-3)^3))
-  for i = -3, 3 do    -- variables avoid constant folding
-    for j = -3, 3 do
-      assert(eq(i^j, 1 / i^(-j)))
-     end
-  end
-end
-
-
-assert(maxint + 0.0 == maxint)
-assert(maxint + 0.0 == 2.0^(intbits - 1) - 1.0)
-assert(minint + 0.0 == minint)
-assert(minint + 0.0 == -2.0^(intbits - 1))
-
-assert(math.pi // 1 == 3)
-assert(-math.pi // 1 == -4)
+assert(1//0.0 == 1/0)
+assert(-1 // 0.0 == -1/0)
+assert(eqT(3.5 // 1.5, 2.0))
+assert(eqT(3.5 // -1.5, -3.0))
 
 assert(maxint // maxint == 1)
 assert(maxint // 1 == maxint)
@@ -147,26 +146,50 @@ assert(minint // -2 == 2^(intbits - 2))
 assert(maxint // -1 == -maxint)
 
 
+-- negative exponents
+do
+  assert(2^-3 == 1 / 2^3)
+  assert(eq((-3)^-3, 1 / (-3)^3))
+  for i = -3, 3 do    -- variables avoid constant folding
+      for j = -3, 3 do
+        -- domain errors (0^(-n)) are not portable
+        if not _port or i ~= 0 or j > 0 then
+          assert(eq(i^j, 1 / i^(-j)))
+       end
+    end
+  end
+end
+
+
+assert(maxint + 0.0 == maxint)
+assert(maxint + 0.0 == 2.0^(intbits - 1) - 1.0)
+assert(minint + 0.0 == minint)
+assert(minint + 0.0 == -2.0^(intbits - 1))
+
+
 -- avoiding errors at compile time
-assert(not pcall(assert(load"return 2 // 0")))
-assert(not pcall(assert(load"return 2.3 // 0")))
-assert(not pcall(assert(load("return 2.0^" .. (intbits - 1) .. " // 1"))))
-assert(not pcall(assert(load("return math.huge // 1"))))
-assert(not pcall(assert(load("return 1 // 2.0^" .. (intbits - 1)))))
-assert(not pcall(assert(load"return 2.3 // '0.0'")))
+local function checkcompt (msg, code)
+  checkerror(msg, assert(load(code)))
+end
+checkcompt("divide by zero", "return 2 // 0")
+checkcompt(msgf2i, "return 2.3 >> 0")
+checkcompt(msgf2i, ("return 2.0^%d & 1"):format(intbits - 1))
+checkcompt("field 'huge'", "return math.huge << 1")
+checkcompt(msgf2i, ("return 1 | 2.0^%d"):format(intbits - 1))
+checkcompt(msgf2i, "return 2.3 ~ '0.0'")
 
 
--- testing overflow errors when converting from float to integer
-local function f2i (x) return x // 1 end
-assert(not pcall(f2i, math.huge))     -- +inf
-assert(not pcall(f2i, -math.huge))    -- -inf
-assert(not pcall(f2i, 0/0))           -- NaN
+-- testing overflow errors when converting from float to integer (runtime)
+local function f2i (x) return x | x end
+checkerror(msgf2i, f2i, math.huge)     -- +inf
+checkerror(msgf2i, f2i, -math.huge)    -- -inf
+checkerror(msgf2i, f2i, 0/0)           -- NaN
 
 if floatbits < intbits then
   -- conversion tests when float cannot represent all integers
   assert(maxint + 1.0 == maxint)
   assert(minint - 1.0 == minint)
-  assert(not pcall(f2i, maxint + 0.0))
+  checkerror(msgf2i, f2i, maxint + 0.0)
   assert(f2i(2.0^(intbits - 2)) == 1 << (intbits - 2))
   assert(f2i(-2.0^(intbits - 2)) == -(1 << (intbits - 2)))
   assert((2.0^(floatbits - 1) + 1.0) // 1 == (1 << (floatbits - 1)) + 1)
@@ -180,8 +203,8 @@ else
   assert(maxint + 1.0 > maxint)
   assert(minint - 1.0 < minint)
   assert(f2i(maxint + 0.0) == maxint)
-  assert(not pcall(f2i, maxint + 1.0))
-  assert(not pcall(f2i, minint - 1.0))
+  checkerror("no integer rep", f2i, maxint + 1.0)
+  checkerror("no integer rep", f2i, minint - 1.0)
 end
 
 -- 'minint' should be representable as a float no matter the precision
@@ -286,6 +309,7 @@ assert(f(tonumber('nan')) == nil)
 assert(f(tonumber('  ')) == nil)
 assert(f(tonumber('')) == nil)
 assert(f(tonumber('1  a')) == nil)
+assert(f(tonumber('1  a', 2)) == nil)
 assert(f(tonumber('1\0')) == nil)
 assert(f(tonumber('1 \0')) == nil)
 assert(f(tonumber('1\0 ')) == nil)
@@ -299,11 +323,15 @@ assert(f(tonumber(' 3.4.5 ')) == nil)
 assert(tonumber('0x') == nil)
 assert(tonumber('x') == nil)
 assert(tonumber('x3') == nil)
+assert(tonumber('0x3.3.3') == nil)   -- two decimal points
 assert(tonumber('00x2') == nil)
 assert(tonumber('0x 2') == nil)
 assert(tonumber('0 x2') == nil)
 assert(tonumber('23x') == nil)
 assert(tonumber('- 0xaa') == nil)
+assert(tonumber('-0xaaP ') == nil)   -- no exponent
+assert(tonumber('0x0.51p') == nil)
+assert(tonumber('0x5p+-2') == nil)
 
 
 -- testing hexadecimal numerals
@@ -324,13 +352,12 @@ assert(0E+1 == 0 and 0xE+1 == 15 and 0xe-1 == 13)
 assert(tonumber('  0x2.5  ') == 0x25/16)
 assert(tonumber('  -0x2.5  ') == -0x25/16)
 assert(tonumber('  +0x0.51p+8  ') == 0x51)
-assert(tonumber('0x0.51p') == nil)
-assert(tonumber('0x5p+-2') == nil)
 assert(0x.FfffFFFF == 1 - '0x.00000001')
 assert('0xA.a' + 0 == 10 + 10/16)
 assert(0xa.aP4 == 0XAA)
 assert(0x4P-2 == 1)
 assert(0x1.1 == '0x1.' + '+0x.1')
+assert(0Xabcdef.0 == 0x.ABCDEFp+24)
 
 
 assert(1.1 == 1.+.1)
@@ -375,12 +402,32 @@ assert(minint % -1 == 0)
 assert(minint % -2 == 0)
 assert(maxint % -2 == -1)
 
-do
-  local x = 0.0 % 0
-  assert(x ~= x)    -- Not a Number
-  x = 1.3 % 0
-  assert(x ~= x)    -- Not a Number
+-- non-portable tests because Windows C library cannot compute 
+-- fmod(1, huge) correctly
+if not _port then
+  local function anan (x) assert(x ~= x) end   -- assert Not a Number
+  anan(0.0 % 0)
+  anan(1.3 % 0)
+  anan(math.huge % 1)
+  anan(math.huge % 1e30)
+  anan(-math.huge % 1e30)
+  anan(-math.huge % -1e30)
+  assert(1 % math.huge == 1)
+  assert(1e30 % math.huge == 1e30)
+  assert(1e30 % -math.huge == -math.huge)
+  assert(-1 % math.huge == math.huge)
+  assert(-1 % -math.huge == -1)
 end
+
+
+-- testing unsigned comparisons
+assert(math.ult(3, 4))
+assert(not math.ult(4, 4))
+assert(math.ult(-2, -1))
+assert(math.ult(2, -1))
+assert(not math.ult(-2, -2))
+assert(math.ult(maxint, minint))
+assert(not math.ult(minint, maxint))
 
 
 assert(eq(math.sin(-9.8)^2 + math.cos(-9.8)^2, 1))
@@ -435,20 +482,26 @@ do   -- testing floor & ceil
     assert(math.ceil(2^p) == 2^p)
     assert(math.ceil(2^p - 0.5) == 2^p)
   end
-  assert(not pcall(math.floor, {}))
-  assert(not pcall(math.ceil, print))
-  assert(eqT(math.ifloor(minint), minint))
-  assert(eqT(math.ifloor(maxint), maxint))
-  assert(eqT(math.ifloor(minint + 0.0), minint))
-  assert(math.ifloor(0.0 - minint) == nil)
-  assert(math.ifloor(math.pi) == 3)
-  assert(math.ifloor(-math.pi) == -4)
+  checkerror("number expected", math.floor, {})
+  checkerror("number expected", math.ceil, print)
+  assert(eqT(math.tointeger(minint), minint))
+  assert(eqT(math.tointeger(minint .. ""), minint))
+  assert(eqT(math.tointeger(maxint), maxint))
+  assert(eqT(math.tointeger(maxint .. ""), maxint))
+  assert(eqT(math.tointeger(minint + 0.0), minint))
+  assert(math.tointeger(0.0 - minint) == nil)
+  assert(math.tointeger(math.pi) == nil)
+  assert(math.tointeger(-math.pi) == nil)
   assert(math.floor(math.huge) == math.huge)
   assert(math.ceil(math.huge) == math.huge)
-  assert(math.ifloor(math.huge) == nil)
+  assert(math.tointeger(math.huge) == nil)
   assert(math.floor(-math.huge) == -math.huge)
   assert(math.ceil(-math.huge) == -math.huge)
-  assert(math.ifloor(-math.huge) == nil)
+  assert(math.tointeger(-math.huge) == nil)
+  assert(math.tointeger("34.0") == 34)
+  assert(math.tointeger("34.3") == nil)
+  assert(math.tointeger({}) == nil)
+  assert(math.tointeger(0/0) == nil)    -- NaN
 end
 
 
@@ -471,10 +524,12 @@ assert(eqT(math.fmod(maxint, maxint), 0))
 assert(eqT(math.fmod(minint + 1, minint), minint + 1))
 assert(eqT(math.fmod(maxint - 1, maxint), maxint - 1))
 
-assert(not pcall(math.fmod, 3, 0))
+checkerror("zero", math.fmod, 3, 0)
 
 
 do    -- testing max/min
+  checkerror("value expected", math.max)
+  checkerror("value expected", math.min)
   assert(eqT(math.max(3), 3))
   assert(eqT(math.max(3, 5, 9, 1), 9))
   assert(math.max(maxint, 10e60) == 10e60)

@@ -1,3 +1,5 @@
+-- $Id: nextvar.lua,v 1.75 2014/12/26 17:20:53 roberto Exp $
+
 print('testing tables, next, and for')
 
 local a = {}
@@ -33,7 +35,11 @@ assert(i == 4)
 -- iterator function is always the same
 assert(type(ipairs{}) == 'function' and ipairs{} == ipairs{})
 
-if T then  --[
+
+if not T then
+  (Message or print)
+    ('\n >>> testC not active: skipping tests for table sizes <<<\n')
+else --[
 -- testing table sizes
 
 local function log2 (x) return math.log(x, 2) end
@@ -212,6 +218,10 @@ assert(xxx==find("xxx"))
 -- invalid key to 'next'
 assert(string.find(select(2, pcall(next, {10,20}, 3)), "invalid key"))
 
+-- both 'pairs' and 'ipairs' need an argument
+assert(string.find(select(2, pcall(pairs)), "bad argument"))
+assert(string.find(select(2, pcall(ipairs)), "bad argument"))
+
 print('+')
 
 a = {}
@@ -364,6 +374,81 @@ assert(table.remove(a, #a) == 40)
 assert(a[#a] == 30)
 assert(table.remove(a, 2) == 20)
 assert(a[#a] == 30 and #a == 2)
+
+do   -- testing table library with metamethods
+  local function test (proxy, t)
+    for i = 1, 10 do
+      table.insert(proxy, 1, i)
+    end
+    assert(#proxy == 10 and #t == 10)
+    for i = 1, 10 do
+      assert(t[i] == 11 - i)
+    end
+    table.sort(proxy)
+    for i = 1, 10 do
+      assert(t[i] == i and proxy[i] == i)
+    end
+    assert(table.concat(proxy, ",") == "1,2,3,4,5,6,7,8,9,10")
+    for i = 1, 8 do
+      assert(table.remove(proxy, 1) == i)
+    end
+    assert(#proxy == 2 and #t == 2)
+    local a, b, c = table.unpack(proxy)
+    assert(a == 9 and b == 10 and c == nil)
+  end
+
+  -- all virtual
+  local t = {}
+  local proxy = setmetatable({}, {
+    __len = function () return #t end,
+    __index = t,
+    __newindex = t,
+  })
+  test(proxy, t)
+
+  -- only __newindex
+  local count = 0
+  t = setmetatable({}, {
+    __newindex = function (t,k,v) count = count + 1; rawset(t,k,v) end})
+  test(t, t)
+  assert(count == 10)   -- after first 10, all other sets are not new
+
+  -- no __newindex
+  t = setmetatable({}, {
+    __index = function (_,k) return k + 1 end,
+    __len = function (_) return 5 end})
+  assert(table.concat(t, ";") == "2;3;4;5;6")
+
+end
+
+do
+  -- Test to ensure that, when there are no metamethods,
+  -- library uses raw access.
+  -- (tricky: assumes undocumented behavior that test for presence of
+  --  metamethods is done before getting the length of the table)
+  local t = setmetatable({}, {
+    -- once 'len' is called, only raw access will work
+    __len = function (t)
+              getmetatable(t).__index = error
+              getmetatable(t).__newindex = error
+              return 10
+            end
+  })
+  table.insert(t, 1, 10)  -- work
+  assert(rawget(t, 1) == 10)
+  assert(not pcall(table.insert, t, 20))  -- does not work any more
+
+  -- still does not work
+  assert(not pcall(table.sort, t, function (_,_) return false end))
+  -- reset access
+  getmetatable(t).__index = nil
+  getmetatable(t).__newindex = nil
+  -- now it works again
+  assert(pcall(table.sort, t, function (_,_) return false end))
+  -- not any more
+  assert(not pcall(table.sort, t, function (_,_) return false end))
+end
+      
 print('+')
 
 a = {}
@@ -511,15 +596,15 @@ end
 a.n = 5
 a[3] = 30
 
+-- testing ipairs with metamethods
 a = {n=10}
-setmetatable(a, {__len = function (x) return x.n end,
-                 __ipairs = function (x) return function (e,i)
-                             if i < #e then return i+1 end
-                           end, x, 0 end})
+setmetatable(a, { __index = function (t,k)
+                     if k <= t.n then return k * 10 end 
+                  end})
 i = 0
 for k,v in ipairs(a) do
   i = i + 1
-  assert(k == i and v == nil)
+  assert(k == i and v == i * 10)
 end
 assert(i == a.n)
 

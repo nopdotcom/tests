@@ -1,8 +1,15 @@
+-- $Id: strings.lua,v 1.77 2014/12/26 17:20:53 roberto Exp $
+
 print('testing strings and string library')
 
-local Csize = require'debug'.Csize
-
 local maxi, mini = math.maxinteger, math.mininteger
+
+
+local function checkerror (msg, f, ...)
+  local s, err = pcall(f, ...)
+  assert(not s and string.find(err, msg))
+end
+
 
 -- testing string comparisons
 assert('alo' < 'alo1')
@@ -92,6 +99,12 @@ assert(string.rep('teste', 0) == '')
 assert(string.rep('tés\00tê', 2) == 'tés\0têtés\000tê')
 assert(string.rep('', 10) == '')
 
+if string.packsize("i") == 4 then
+  -- result length would be 2^31 (int overflow)
+  checkerror("too large", string.rep, 'aa', (1 << 30))
+  checkerror("too large", string.rep, 'a', (1 << 30), ',')
+end
+
 -- repetitions with separator
 assert(string.rep('teste', 0, 'xuxu') == '')
 assert(string.rep('teste', 1, 'xuxu') == 'teste')
@@ -166,15 +179,15 @@ local m = setmetatable({}, {__tostring = function () return "hello" end})
 assert(string.format("%s %.10s", m, m) == "hello hello")
 
 
-assert(string.format("%x", 0.3) == "0")
-assert(string.format("%02x", 0.1) == "00")
+assert(string.format("%x", 0.0) == "0")
+assert(string.format("%02x", 0.0) == "00")
 assert(string.format("%08X", 4294967295) == "FFFFFFFF")
 assert(string.format("%+08d", 31501) == "+0031501")
 assert(string.format("%+08d", -30927) == "-0030927")
 
 
 -- longest number that can be formated
-local largefinite = (Csize("F") >= 8) and 1e308 or 1e38
+local largefinite = (string.packsize("n") >= 8) and 1e308 or 1e38
 assert(string.len(string.format('%99.99f', -largefinite)) >= 100)
 
 
@@ -186,35 +199,45 @@ do   -- assume at least 32 bits
   assert(string.sub(string.format("%x", min), -8) == "80000000")
   assert(string.format("%d", max) ==  "2147483647")
   assert(string.format("%d", min) == "-2147483648")
+  assert(string.format("%u", 0xffffffff) == "4294967295")
+  assert(string.format("%o", 0xABCD) == "125715")
 
-  max, min = math.maxinteger, math.mininteger
+  max, min = 0x7fffffffffffffff, -0x8000000000000000
   if max > 2.0^53 then  -- only for 64 bits
-    assert(string.format("%x", 2^52 // 1 - 1) == "fffffffffffff")
+    assert(string.format("%x", (2^52 | 0) - 1) == "fffffffffffff")
     assert(string.format("0x%8X", 0x8f000003) == "0x8F000003")
     assert(string.format("%d", 2^53) == "9007199254740992")
-    assert(string.format("%d", -2^53) == "-9007199254740992")
+    assert(string.format("%i", -2^53) == "-9007199254740992")
     assert(string.format("%x", max) == "7fffffffffffffff")
     assert(string.format("%x", min) == "8000000000000000")
     assert(string.format("%d", max) ==  "9223372036854775807")
     assert(string.format("%d", min) == "-9223372036854775808")
+    assert(string.format("%u", ~(-1 << 64)) == "18446744073709551615")
     assert(tostring(1234567890123) == '1234567890123')
   end
 end
 
-if not _noformatA then
+if not pcall(string.format, "%a", 0) then
+  (Message or print)("\n >>> format '%a' not available <<<\n")
+else
   print("testing 'format %a %A'")
-  assert(tonumber(string.format("%.2a", 0.5)) == 0x1.00p-1)
+  local s = string.format("%.2a", 0.5)
+  -- ISO C does not enforce a unique format...
+  assert(string.find(s, "^0x%x%.%x%xp[-+]%d$"))
+  assert(tonumber(s) == 0.5)
+  s = string.format("%.4A", -3)
+  assert(string.find(s, "^%-0X%x%.%x%x%x%xP[-+]%d$"))
+  assert(tonumber(s) == -3.0)
   assert(tonumber(string.format("%A", 0x1fffff.0)) == 0X1.FFFFFP+20)
-  assert(tonumber(string.format("%.4a", -3)) == -0x1.8000p+1)
-  assert(tonumber(string.format("%a", -0.1)) == -0.1)
+  assert(tonumber(string.format("%.30a", -0.1)) == -0.1)
+  assert(tonumber(string.format("%a", -3^12)) == -3^12)
 end
 
 
 -- errors in format
 
 local function check (fmt, msg)
-  local s, err = pcall(string.format, fmt, 10)
-  assert(not s and string.find(err, msg))
+  checkerror(msg, string.format, fmt, 10)
 end
 
 local aux = string.rep('0', 600)
@@ -275,8 +298,6 @@ if not _port then
   if not trylocale("ctype") then
     print("locale not supported")
   else
-    assert(load("a = 3.4"));  -- parser should not change outside locale
-    assert(not load("á = 3.4"));  -- even with errors
     assert(string.gsub("áéíóú", "%a", "x") == "xxxxx")
     assert(string.gsub("áÁéÉ", "%l", "x") == "xÁxÉ")
     assert(string.gsub("áÁéÉ", "%u", "x") == "áxéx")
@@ -287,203 +308,6 @@ if not _port then
   assert(os.setlocale() == 'C')
   assert(os.setlocale(nil, "numeric") == 'C')
 
-end
-
-
-print"testing dump/undump"
-
-local numbytes = Csize'I'
-
-local maxbytes = 12
-
--- basic dump/undump with default arguments
-for _, i in ipairs{0, 1, 2, 127, 128, 255, -128, -1, -2} do
-  assert(string.undumpint(string.dumpint(i)) == i)
-end
-
--- basic dump/undump with non-default arguments
-for _, e in pairs{"l", "b"} do
-  for s = 2, maxbytes do
-    for _, i in ipairs{0, 1, 2, 127, 128, 255, 32767, -32768,
-                       -128, -1, -2, 0x5BCD} do
-      assert(string.undumpint(string.dumpint(i, s, e), 1, s, e) == i)
-    end
-  end
-end
-
--- default size is the size of a Lua integer
-assert(#string.dumpint(0) == numbytes)
-assert(string.dumpint(-234, 0) == string.dumpint(-234))
-
--- endianess
-assert(string.dumpint(34, 4, 'l') == "\34\0\0\0")
-assert(string.dumpint(34, 4, 'b') == "\0\0\0\34")
-assert(string.dumpint(0, 3, 'n') == "\0\0\0")
-
-
--- unsigned values
-assert(string.dumpint(255, 1, 'l') == "\255")
-assert(string.dumpint(0xffffff, 3) == "\255\255\255")
-assert(string.dumpint(0x8000, 2, 'b') == "\x80\0")
-
--- for unsigned, we need to mask results (but there is no errors)
-assert(string.undumpint("\x80\0", 1, 2, 'b') & 0xFFFF == 0x8000)
-
-local m = 0xf1f2f3ff
-assert(string.undumpint('\0\0\0\0\xf1\xf2\xf3\xff', 5, 4, 'b') & m == m)
-
-
-
-local function check (i, s, n)
-  assert(string.dumpint(n, i, 'l') == s)
-  assert(string.dumpint(n, i, 'b') == s:reverse())
-  assert(string.undumpint(s, 1, i, 'l') == n)
-  assert(string.undumpint(s:reverse(), 1, i, 'b') == n)
-end
-
-
-for i = 1, maxbytes do
-  -- 1111111...111111
-  check(i, string.rep("\255", i), -1)
-  local p = 1 << (i*8 - 1)
-  if p ~= 0 then
-    -- 10000...00000000
-    check(i, string.rep("\0", i - 1) .. "\x80", -p)
-    -- 01111...1111111
-    check(i, string.rep("\255", i - 1) .. "\x7f", p - 1)
-  end
-  -- 000...0001111111
-  check(i, "\127" .. string.rep("\0", i - 1), 127)
-  check(i, "\209" .. string.rep("\255", i - 1), 209 - 256)
-end
-
-
-for i = 0, maxbytes - numbytes do
-  -- largest allowed unsigned number with extra leading zeros
-  local s = string.rep("\0", i) .. string.rep("\255", numbytes)
-  assert(string.undumpint(s, 1, i + numbytes, "b") == ~0)
-  -- another large unsigned number
-  s = string.rep("\0", i) .. string.rep("\255", numbytes - 1) .. "\12"
-  assert(string.undumpint(s, 1, i + numbytes, "b") == ~0 - (255 - 12))
-end
- 
-
--- signal extension
-assert(string.undumpint("\x19\xff\0", -3, 3, 'l') == 0xff19)
-assert(string.undumpint("\19\xff\0", -3, 2, 'l') == -237)
-
-
--- position
-local s = "\0\255\123\9\1\47\200"
-for i = 1, #s do
-  assert(string.undumpint(s, i, 1) & 0xff == string.byte(s, i))
-end
-
-for i = 1, #s - 1 do
-  assert(string.undumpint(s, i, 2, 'b') & 0xffff ==
-  string.byte(s, i)*256 + string.byte(s, i + 1))
-end
-
-for i = 1, #s - 2 do
-  assert(string.undumpint(s, i, 3, 'l') & 0xffffff ==
-  string.byte(s, i + 2)*256^2 + string.byte(s, i + 1)*256 + string.byte(s, i))
-end
-
-
--- testing overflow in dumping
-
-local function checkerror (n, size, endian)
-  local status, msg = pcall(string.dumpint, n, size, endian)
-  assert(not status and string.find(msg, "does not fit"))
-end
-
-for i = 1, numbytes - 1 do
-  local maxunsigned = (1 << i*8) - 1
-  local minsigned = -maxunsigned // 2
-
-  local s = string.dumpint(maxunsigned, i)
-  assert(string.undumpint(s, 1, i) % (maxunsigned + 1) == maxunsigned)
-  checkerror(maxunsigned + 1, i, 'l')
-  checkerror(maxunsigned + 1, i, 'b')
-  if i > 1 then
-    checkerror(maxunsigned, i - 1)
-  end
-
-  s = string.dumpint(minsigned, i)
-  assert(string.undumpint(s, 1, i) == minsigned)
-  checkerror(minsigned - 1, i, 'l')
-  checkerror(minsigned - 1, i, 'b')
-end
-
-
--- testing overflow in undumping
-
-checkerror = function (s, size, endian)
-    local status, msg = pcall(string.undumpint, s, 1, size, endian)
-    assert(not status and string.find(msg, "does not fit"))
-end
-
-checkerror("\3\0\0\0\0\0\0\0\0\0", 10, 'b')
-checkerror("\0\0\0\0\0\0\0\0\3", 9, 'l')
-checkerror("\x7f\xff\xff\xff\xff\xff\xff\xff\xff\xff", 10, 'b')
-checkerror("\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\x7f", 12, 'l')
-
--- looks like negative integers, but they are not (because of leading zero)
-checkerror("\0\xff\xff\xff\xff\xff\xff\xff\xff\x23", 10, 'b')
-checkerror("\0\0\xff\xff\xff\xff\xff\xff\xff\xff\xff\x23", 12, 'b')
--- looks like positive integers, but they are not
-checkerror("\x01\0\0\0\0\0\0\0\0\x23", 10, 'b')
-checkerror("\x80\0\0\0\0\0\0\0\0\0\0\x23", 12, 'b')
-
-
--- check errors in arguments
-function check (msg, f, ...)
-  local status, err = pcall(f, ...)
-  assert(not status and string.find(err, msg))
-end
-
-check("string too short", string.undumpint, "\1\2\3\4", maxi)
-check("string too short", string.undumpint, "\1\2\3\4", (1 << 31) - 1)
-check("string too short", string.undumpint, "\1\2\3\4", 4, 2)
-check("endianness", string.undumpint, "\1\2\3\4", 1, 2, 'x')
-check("endianness", string.dumpint, -1, 2, 'x')
-check("out of valid range", string.dumpint, -1, maxbytes + 1)
-
-
-
--- checking dump/undump of floating numbers
-
-check("string too short", string.undumpfloat, "\1\2\3\4", 2, "f")
-check("string too short", string.undumpfloat, "\1\2\3\4\5\6\7", 2, "d")
-check("string too short", string.undumpfloat, "\1\2\3\4", (1 << 31) - 1)
-
-assert(string.undumpfloat(string.dumpfloat(120.5, 'n', 'n'), 1, 'n', 'n')
-   == 120.5)
-
-for _, n in ipairs{0, -1.1, 1.9, 1/0, -1/0, 1e20, -1e20, 0.1, 2000.7} do
-  assert(string.undumpfloat(string.dumpfloat(n)) == n)
-  assert(string.undumpfloat(string.dumpfloat(n, 'n'), 1, 'n') == n)
-  assert(string.dumpfloat(n, 'f', 'l') ==
-         string.dumpfloat(n, 'f', 'b'):reverse())
-  assert(string.dumpfloat(n, 'd', 'b') ==
-         string.dumpfloat(n, 'd', 'l'):reverse())
-end
-
--- for non-native precisions, test only with "round" numbers
-for _, n in ipairs{0, -1.5, 1/0, -1/0, 1e10, -1e9, 0.5, 2000.25} do
-  assert(string.undumpfloat(string.dumpfloat(n, 'f'), 1, 'f') == n)
-  assert(string.undumpfloat(string.dumpfloat(n, 'd'), 1, 'd') == n)
-end
-
--- position
-for i = 1, 11 do
-  local s = string.rep("0", i)  .. string.dumpfloat(3.125)
-  assert(string.undumpfloat(s, i + 1) == 3.125)
-end
-
-if not _port then
-  assert(#string.dumpfloat(0, 'f') == 4)
-  assert(#string.dumpfloat(0, 'd') == 8)
 end
 
 print('OK')
